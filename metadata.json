@@ -1,0 +1,5 @@
+{
+  "name": "StreamDeck Overlay & Control",
+  "description": "A P2P streaming companion. Use your tablet to control your OBS overlay, play sounds, and monitor Twitch chat.",
+  "requestFramePermissions": []
+}
