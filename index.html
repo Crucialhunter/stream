@@ -1,6 +1,5 @@
-
 <!DOCTYPE html>
-<html lang="en" class="h-full w-full fixed inset-0 overflow-hidden overscroll-none">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
@@ -20,6 +19,34 @@
       .scrollbar-hide {
           -ms-overflow-style: none;
           scrollbar-width: none;
+      }
+      
+      /* Layout & Safe Area Fixes for Mobile/Tablet Browsers */
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        /* Allow native document scrolling */
+        overflow-y: auto;
+        overflow-x: hidden;
+        background-color: #111827; /* bg-gray-900 */
+        color: white;
+      }
+
+      #root {
+        /* Ensure app takes at least full viewport height */
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        
+        /* iOS Safe Area Support */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
       }
       
       /* Animation Keyframes */
@@ -82,7 +109,7 @@
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="h-full w-full fixed inset-0 bg-gray-900 text-white overflow-hidden overscroll-none touch-none">
+  <body class="bg-gray-900 text-white">
     <div id="root"></div>
     <script type="module" src="/src/index.tsx"></script>
   <script type="module" src="/index.tsx"></script>

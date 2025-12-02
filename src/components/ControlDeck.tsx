@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Peer, DataConnection } from 'peerjs';
 import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, MessageSquare, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize } from 'lucide-react';
@@ -715,12 +716,15 @@ const ControlDeck: React.FC = () => {
   }
 
   // --- MAIN UI ---
-  // Using fixed inset-0 to prevent body scrolling when input is focused on tablets
+  // LAYOUT FIX: Used min-h-screen instead of fixed h-screen.
+  // Sidebar is sticky on desktop/tablet to stay visible while buttons scroll.
+  // Document body scrolling is enabled to handle address bars/safe areas.
   return (
-    <div className="fixed inset-0 h-[100dvh] w-full overflow-hidden overscroll-none flex flex-col md:flex-row bg-gray-900 text-white relative touch-none">
+    <div className="w-full min-h-screen flex flex-col md:flex-row bg-gray-900 text-white relative">
       
       {/* Sidebar: Chat / Events / Tools */}
-      <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-1/2 md:h-full z-10 shadow-xl">
+      {/* Mobile: h-[50vh] scrollable area. Desktop: h-screen sticky to top. */}
+      <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-[50vh] md:h-[100dvh] md:sticky md:top-0 z-10 shadow-xl">
          
          {/* Top Status */}
          <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900 flex-shrink-0">
@@ -777,7 +781,7 @@ const ControlDeck: React.FC = () => {
       </div>
 
       {/* Main Button Grid */}
-      <div className="flex-1 p-4 overflow-y-auto bg-gray-900/95 flex flex-col touch-pan-y">
+      <div className="flex-1 p-4 bg-gray-900/95 flex flex-col">
          <div className="flex justify-between items-center mb-4 flex-shrink-0">
              <h1 className="text-xl font-bold text-gray-400 flex items-center gap-2"><Volume2 className="w-5 h-5" /> Soundboard</h1>
              <div className="flex items-center gap-2">
