@@ -1,4 +1,5 @@
 
+
 export type AppMode = 'CONTROL' | 'OVERLAY' | 'SETTINGS';
 
 export type FontStyle = 'standard' | 'retro' | 'scifi' | 'comic' | 'horror' | 'handwritten';
@@ -59,6 +60,20 @@ export interface PollState {
   options: PollOption[];
   totalVotes: number;
   winnerId?: string;
+}
+
+export interface ActiveAlert {
+    type: 'sfx' | 'chat';
+    text?: string;
+    image?: string;
+    chatMsg?: ChatMessage;
+    label?: string;
+    
+    // Style props
+    fontStyle?: FontStyle;
+    animation?: AnimationStyle;
+    color?: string;
+    textColor?: string;
 }
 
 export interface TwitchConfig {

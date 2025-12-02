@@ -1,18 +1,18 @@
-
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Peer, DataConnection } from 'peerjs';
-import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, MessageSquare, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize } from 'lucide-react';
+import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize, FlaskConical, PlayCircle, UserPlus, Users, MessageSquarePlus, Zap } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD, SOUND_LIBRARY, FONT_STYLES, ANIMATION_STYLES } from '../constants';
-import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState } from '../types';
+import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState, ActiveAlert } from '../types';
 import { TwitchIRC } from '../services/twitchIRC';
 import { playSynthSound } from '../services/audioService';
+import { generateMockChat, generateMockEvent, generateMockPoll } from '../services/mockService';
 import ChatMonitor from './ChatMonitor';
 import ViewerCounter from './ViewerCounter';
 import Settings from './Settings';
+import OverlayDisplay from './OverlayDisplay';
 
-// --- NEW COMPONENT: EVENTS PANEL ---
+// --- EVENTS PANEL ---
 const EventsPanel: React.FC<{ events: StreamEvent[], onDismiss: (id: string) => void }> = ({ events, onDismiss }) => (
     <div className="flex-1 bg-gray-800 rounded-xl overflow-hidden flex flex-col border border-gray-700">
         <div className="p-3 bg-gray-750 font-bold border-b border-gray-700 flex items-center gap-2">
@@ -38,7 +38,7 @@ const EventsPanel: React.FC<{ events: StreamEvent[], onDismiss: (id: string) => 
     </div>
 );
 
-// --- NEW COMPONENT: POLL TOOL ---
+// --- POLL TOOL ---
 const PollTool: React.FC<{ activePoll: PollState | null, onCreate: (q: string, opts: string[]) => void, onEnd: () => void }> = ({ activePoll, onCreate, onEnd }) => {
     const [question, setQuestion] = useState('');
     const [options, setOptions] = useState(['Yes', 'No']);
@@ -103,7 +103,54 @@ const PollTool: React.FC<{ activePoll: PollState | null, onCreate: (q: string, o
     );
 };
 
-// --- COMPONENT: BUTTON EDITOR ---
+// --- DEMO TOOLS (MOCK DATA) ---
+const DemoTools: React.FC<{ 
+    onAddChat: () => void, 
+    onAddEvent: () => void, 
+    onStartPoll: () => void,
+    onVotePoll: () => void
+}> = ({ onAddChat, onAddEvent, onStartPoll, onVotePoll }) => {
+    return (
+        <div className="flex-1 bg-gray-800 rounded-xl p-4 flex flex-col border-2 border-yellow-600/50 overflow-y-auto relative">
+             <div className="absolute inset-0 bg-yellow-500/5 pointer-events-none" />
+             <div className="p-3 bg-yellow-900/30 font-bold border-b border-yellow-700/50 flex items-center gap-2 rounded mb-3">
+                <FlaskConical className="w-4 h-4 text-yellow-500" /> Demo Controls
+            </div>
+            <div className="space-y-3 z-10">
+                <button onClick={onAddChat} className="w-full flex items-center p-3 rounded bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-gray-500 transition text-left">
+                    <MessageSquarePlus className="w-5 h-5 mr-3 text-green-400" />
+                    <div>
+                        <div className="text-sm font-bold">Add Chat Message</div>
+                        <div className="text-[10px] text-gray-400">Random user & message</div>
+                    </div>
+                </button>
+                <button onClick={onAddEvent} className="w-full flex items-center p-3 rounded bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-gray-500 transition text-left">
+                    <UserPlus className="w-5 h-5 mr-3 text-pink-400" />
+                    <div>
+                        <div className="text-sm font-bold">Trigger Event</div>
+                        <div className="text-[10px] text-gray-400">Follow, Sub, Raid, etc.</div>
+                    </div>
+                </button>
+                <button onClick={onStartPoll} className="w-full flex items-center p-3 rounded bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-gray-500 transition text-left">
+                    <BarChart2 className="w-5 h-5 mr-3 text-blue-400" />
+                    <div>
+                        <div className="text-sm font-bold">Start Demo Poll</div>
+                        <div className="text-[10px] text-gray-400">Creates a preset poll</div>
+                    </div>
+                </button>
+                <button onClick={onVotePoll} className="w-full flex items-center p-3 rounded bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-gray-500 transition text-left">
+                    <Users className="w-5 h-5 mr-3 text-purple-400" />
+                    <div>
+                        <div className="text-sm font-bold">Simulate Votes</div>
+                        <div className="text-[10px] text-gray-400">Adds random votes</div>
+                    </div>
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// --- BUTTON EDITOR ---
 const ButtonEditor: React.FC<{ 
     button: SoundItem, 
     onSave: (btn: SoundItem) => void, 
@@ -116,16 +163,12 @@ const ButtonEditor: React.FC<{
     return (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-gray-900 rounded-2xl w-full max-w-2xl border border-gray-700 shadow-2xl flex flex-col max-h-[90vh]">
-                
-                {/* Header */}
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800 rounded-t-2xl">
                     <h3 className="text-xl font-bold flex items-center gap-2"><Edit2 className="w-5 h-5 text-yellow-500"/> Edit "{edited.label}"</h3>
                     <div className="flex gap-2">
                         <button onClick={onCancel} className="text-gray-400 hover:text-white"><X className="w-6 h-6"/></button>
                     </div>
                 </div>
-
-                {/* Tabs */}
                 <div className="flex border-b border-gray-700 bg-gray-850">
                     <button onClick={() => setTab('style')} className={`flex-1 py-4 font-bold flex items-center justify-center gap-2 border-b-2 transition ${tab === 'style' ? 'border-yellow-500 text-yellow-400 bg-gray-800' : 'border-transparent text-gray-500 hover:text-white'}`}>
                         <Type className="w-4 h-4"/> Style
@@ -137,25 +180,17 @@ const ButtonEditor: React.FC<{
                         <ImageIcon className="w-4 h-4"/> Visuals
                     </button>
                 </div>
-
-                {/* Content */}
                 <div className="flex-1 overflow-y-auto p-6 bg-gray-900">
-                    {/* STYLE TAB */}
                     {tab === 'style' && (
                         <div className="space-y-6">
                              <div>
                                 <label className="text-xs uppercase text-gray-500 font-bold mb-2 block">Button Label</label>
                                 <input className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-lg font-bold" value={edited.label} onChange={e => setEdited({...edited, label: e.target.value})} />
                              </div>
-                             
                              <div className="grid grid-cols-2 gap-6">
                                 <div>
                                     <label className="text-xs uppercase text-gray-500 font-bold mb-2 block">Icon</label>
-                                    <select 
-                                        className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-sm" 
-                                        value={edited.iconName} 
-                                        onChange={e => setEdited({...edited, iconName: e.target.value})}
-                                    >
+                                    <select className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-sm" value={edited.iconName} onChange={e => setEdited({...edited, iconName: e.target.value})}>
                                         {Object.keys(Icons).slice(0, 100).map(icon => <option key={icon} value={icon}>{icon}</option>)}
                                     </select>
                                 </div>
@@ -164,17 +199,11 @@ const ButtonEditor: React.FC<{
                                     <input className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-sm" value={edited.color} onChange={e => setEdited({...edited, color: e.target.value})} />
                                 </div>
                              </div>
-
                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-gray-800">
                                  <div>
                                      <label className="text-xs uppercase text-gray-500 font-bold mb-2 block">Alert Text Color</label>
                                      <div className="flex items-center gap-3 bg-gray-800 p-2 rounded border border-gray-700">
-                                         <input 
-                                            type="color" 
-                                            className="w-10 h-10 rounded cursor-pointer bg-transparent border-none"
-                                            value={edited.textColor || '#ffffff'}
-                                            onChange={e => setEdited({...edited, textColor: e.target.value})}
-                                         />
+                                         <input type="color" className="w-10 h-10 rounded cursor-pointer bg-transparent border-none" value={edited.textColor || '#ffffff'} onChange={e => setEdited({...edited, textColor: e.target.value})} />
                                          <span className="text-sm font-mono text-gray-400">{edited.textColor || '#ffffff'}</span>
                                      </div>
                                  </div>
@@ -182,27 +211,16 @@ const ButtonEditor: React.FC<{
                                      <label className="text-xs uppercase text-gray-500 font-bold mb-2 block">Font Style</label>
                                      <div className="grid grid-cols-2 gap-2">
                                          {FONT_STYLES.map(fs => (
-                                             <button 
-                                                key={fs.id}
-                                                onClick={() => setEdited({...edited, fontStyle: fs.id as any})}
-                                                className={`text-xs p-2 rounded border ${edited.fontStyle === fs.id ? 'bg-yellow-600/20 border-yellow-500 text-yellow-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
-                                             >
-                                                 {fs.label}
-                                             </button>
+                                             <button key={fs.id} onClick={() => setEdited({...edited, fontStyle: fs.id as any})} className={`text-xs p-2 rounded border ${edited.fontStyle === fs.id ? 'bg-yellow-600/20 border-yellow-500 text-yellow-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}>{fs.label}</button>
                                          ))}
                                      </div>
                                  </div>
                              </div>
                         </div>
                     )}
-
-                    {/* AUDIO TAB */}
                     {tab === 'audio' && (
                         <div className="space-y-6">
-                            <p className="text-sm text-gray-400 mb-4 bg-gray-800 p-3 rounded border border-gray-700">
-                                Choose a built-in game sound or paste a custom URL (MP3/WAV). Built-in sounds are generated instantly on the overlay.
-                            </p>
-
+                            <p className="text-sm text-gray-400 mb-4 bg-gray-800 p-3 rounded border border-gray-700">Choose a built-in game sound or paste a custom URL (MP3/WAV).</p>
                             <div>
                                 <label className="text-xs uppercase text-gray-500 font-bold mb-2 block">Built-in Sound Library</label>
                                 <div className="space-y-4 max-h-60 overflow-y-auto pr-2">
@@ -211,67 +229,36 @@ const ButtonEditor: React.FC<{
                                             <h4 className="text-xs font-bold text-purple-400 uppercase mb-2 sticky top-0 bg-gray-900 py-1">{category}</h4>
                                             <div className="grid grid-cols-2 gap-2">
                                                 {items.map(item => (
-                                                    <button 
-                                                        key={item.id}
-                                                        onClick={() => {
-                                                            setEdited({...edited, soundPreset: item.id});
-                                                            playSynthSound(item.id); // Preview
-                                                        }}
-                                                        className={`flex items-center justify-between p-3 rounded border text-sm text-left group ${edited.soundPreset === item.id ? 'bg-green-600/20 border-green-500 text-green-400' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}
-                                                    >
-                                                        <span>{item.label}</span>
-                                                        <Play className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                                    </button>
+                                                    <button key={item.id} onClick={() => { setEdited({...edited, soundPreset: item.id}); playSynthSound(item.id); }} className={`flex items-center justify-between p-3 rounded border text-sm text-left group ${edited.soundPreset === item.id ? 'bg-green-600/20 border-green-500 text-green-400' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}><span>{item.label}</span><Play className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" /></button>
                                                 ))}
                                             </div>
                                         </div>
                                     ))}
                                 </div>
                             </div>
-
                             <div className="relative">
                                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-700"></div></div>
                                 <div className="relative flex justify-center text-xs font-bold uppercase"><span className="px-2 bg-gray-900 text-gray-500">OR Custom</span></div>
                             </div>
-
                             <div>
                                 <label className="text-xs uppercase text-gray-500 font-bold mb-2 block">Custom Audio URL</label>
-                                <input 
-                                    className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-sm font-mono text-blue-400" 
-                                    placeholder="https://example.com/sound.mp3" 
-                                    value={edited.soundUrl || ''} 
-                                    onChange={e => setEdited({...edited, soundUrl: e.target.value})} 
-                                />
+                                <input className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-sm font-mono text-blue-400" placeholder="https://example.com/sound.mp3" value={edited.soundUrl || ''} onChange={e => setEdited({...edited, soundUrl: e.target.value})} />
                             </div>
                         </div>
                     )}
-
-                    {/* VISUAL TAB */}
                     {tab === 'visual' && (
                         <div className="space-y-6">
                              <div>
                                  <label className="text-xs uppercase text-gray-500 font-bold mb-2 block">Animation Style</label>
                                  <div className="grid grid-cols-3 gap-2">
                                      {ANIMATION_STYLES.map(anim => (
-                                         <button 
-                                            key={anim.id}
-                                            onClick={() => setEdited({...edited, animation: anim.id as any})}
-                                            className={`text-sm p-3 rounded border font-medium ${edited.animation === anim.id ? 'bg-pink-600/20 border-pink-500 text-pink-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}
-                                         >
-                                             {anim.label}
-                                         </button>
+                                         <button key={anim.id} onClick={() => setEdited({...edited, animation: anim.id as any})} className={`text-sm p-3 rounded border font-medium ${edited.animation === anim.id ? 'bg-pink-600/20 border-pink-500 text-pink-400' : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700'}`}>{anim.label}</button>
                                      ))}
                                  </div>
                              </div>
-
                              <div>
                                 <label className="text-xs uppercase text-gray-500 font-bold mb-2 block">Custom Image / GIF URL</label>
-                                <input 
-                                    className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-sm font-mono text-blue-400" 
-                                    placeholder="https://media.giphy.com/..." 
-                                    value={edited.imageUrl || ''} 
-                                    onChange={e => setEdited({...edited, imageUrl: e.target.value})} 
-                                />
+                                <input className="w-full bg-gray-800 border border-gray-700 rounded p-3 text-sm font-mono text-blue-400" placeholder="https://media.giphy.com/..." value={edited.imageUrl || ''} onChange={e => setEdited({...edited, imageUrl: e.target.value})} />
                                 {edited.imageUrl && (
                                     <div className="mt-4 p-4 bg-gray-800 rounded border border-gray-700 flex justify-center">
                                         <img src={edited.imageUrl} alt="Preview" className="max-h-32 object-contain" />
@@ -281,20 +268,10 @@ const ButtonEditor: React.FC<{
                         </div>
                     )}
                 </div>
-
-                {/* Footer */}
                 <div className="p-4 border-t border-gray-700 bg-gray-800 rounded-b-2xl flex gap-3">
-                    <button onClick={() => onSave(edited)} className="flex-1 bg-green-600 hover:bg-green-500 py-3 rounded-lg font-bold text-lg flex items-center justify-center gap-2 shadow-lg shadow-green-900/50">
-                        <Save className="w-5 h-5"/> Save Changes
-                    </button>
-                    
-                    <button onClick={() => onTest(edited)} className="px-6 bg-purple-600 hover:bg-purple-500 rounded-lg font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-purple-900/50">
-                        <Monitor className="w-5 h-5"/> Test
-                    </button>
-
-                    <button onClick={onCancel} className="px-6 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold text-gray-300">
-                        Cancel
-                    </button>
+                    <button onClick={() => onSave(edited)} className="flex-1 bg-green-600 hover:bg-green-500 py-3 rounded-lg font-bold text-lg flex items-center justify-center gap-2 shadow-lg shadow-green-900/50"><Save className="w-5 h-5"/> Save Changes</button>
+                    <button onClick={() => onTest(edited)} className="px-6 bg-purple-600 hover:bg-purple-500 rounded-lg font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-purple-900/50"><Monitor className="w-5 h-5"/> Test</button>
+                    <button onClick={onCancel} className="px-6 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold text-gray-300">Cancel</button>
                 </div>
             </div>
         </div>
@@ -311,7 +288,7 @@ const ControlDeck: React.FC = () => {
   });
 
   // Sidebar Tab State
-  const [activeTab, setActiveTab] = useState<'chat' | 'events' | 'tools'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'events' | 'tools' | 'demo'>('chat');
 
   // App Data State
   const [soundButtons, setSoundButtons] = useState<SoundItem[]>(() => {
@@ -320,6 +297,11 @@ const ControlDeck: React.FC = () => {
   });
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [poll, setPoll] = useState<PollState | null>(null);
+
+  // Demo Mode State
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [demoActiveAlert, setDemoActiveAlert] = useState<ActiveAlert | null>(null);
+  const demoAlertTimeout = useRef<number | null>(null);
 
   // Edit Mode State
   const [isEditMode, setIsEditMode] = useState(false);
@@ -354,6 +336,52 @@ const ControlDeck: React.FC = () => {
     setLogs(prev => [...prev.slice(-99), `[${timestamp}] ${type === 'in' ? '< ' : type === 'out' ? '> ' : ''}${msg}`]);
   }, []);
 
+  // --- DEMO MODE HELPERS ---
+  const triggerDemoAlert = (alert: ActiveAlert) => {
+      setDemoActiveAlert(alert);
+      if (demoAlertTimeout.current) window.clearTimeout(demoAlertTimeout.current);
+      
+      // Auto clear after animation
+      const duration = alert.type === 'chat' ? 10000 : 3000;
+      demoAlertTimeout.current = window.setTimeout(() => setDemoActiveAlert(null), duration);
+  };
+
+  const handleDemoMockChat = () => {
+      const msg = generateMockChat();
+      setChatMessages(prev => [...prev.slice(-49), msg]);
+      setLastMsgTime(Date.now());
+  };
+
+  const handleDemoMockEvent = () => {
+      const evt = generateMockEvent();
+      setEvents(prev => [evt, ...prev]);
+  };
+
+  const handleDemoPoll = () => {
+      setPoll(generateMockPoll());
+  };
+  
+  const handleDemoVote = () => {
+      if (poll && poll.isActive) {
+          const updated = {...poll};
+          // Add 1-3 votes to random options
+          const votesToAdd = Math.ceil(Math.random() * 3);
+          for(let i=0; i<votesToAdd; i++) {
+              const idx = Math.floor(Math.random() * updated.options.length);
+              updated.options[idx].votes++;
+              updated.totalVotes++;
+          }
+          setPoll(updated);
+      }
+  };
+
+  // Switch to Demo tab when Demo Mode enabled
+  useEffect(() => {
+      if (isDemoMode) setActiveTab('demo');
+      else if (activeTab === 'demo') setActiveTab('chat');
+  }, [isDemoMode]);
+
+
   // --- WAKE LOCK LOGIC ---
   const requestWakeLock = async () => {
       if ('wakeLock' in navigator) {
@@ -378,7 +406,6 @@ const ControlDeck: React.FC = () => {
       }
   };
 
-  // Handle Wake Lock based on config and visibility
   useEffect(() => {
       const handleVisibilityChange = () => {
           if (document.visibilityState === 'visible' && twitchConfig.preventSleep) {
@@ -427,58 +454,47 @@ const ControlDeck: React.FC = () => {
     return () => p.destroy();
   }, []);
 
-  // Save Buttons on change
   useEffect(() => {
       localStorage.setItem('sound_buttons', JSON.stringify(soundButtons));
   }, [soundButtons]);
 
-  // --- CONNECTION & RECONNECTION LOGIC ---
+  // --- CONNECTION & RECONNECTION ---
   const connectToOverlay = useCallback(() => {
     if (!peer || inputCode.length !== 4) return;
-    
-    // Don't connect if already connected (avoid duplicate connections)
     if (conn && conn.open) return;
 
-    console.log("Attempting Connection...");
     setStatus('CONNECTING');
     const destId = `${PEER_ID_PREFIX}${inputCode}`;
     const connection = peer.connect(destId);
 
     connection.on('open', () => { 
-        console.log("Connected!");
         setStatus('CONNECTED'); 
         setConn(connection);
-        setAutoReconnect(true); // Enable auto-reconnect once we've had a success
+        setAutoReconnect(true);
     });
 
     connection.on('close', () => { 
-        console.log("Connection Closed");
         setStatus('DISCONNECTED'); 
         setConn(null); 
     });
 
     connection.on('error', (err) => { 
-        console.error("Connection Error", err);
         setStatus('DISCONNECTED'); 
         setConn(null); 
     });
   }, [peer, inputCode, conn]);
 
-  // Auto-Reconnect Interval
   useEffect(() => {
     let interval: number;
     if (autoReconnect && status === 'DISCONNECTED' && inputCode.length === 4) {
-        console.log("Auto-reconnecting...");
-        interval = window.setInterval(connectToOverlay, 3000); // Try every 3 seconds
+        interval = window.setInterval(connectToOverlay, 3000);
     }
     return () => clearInterval(interval);
   }, [autoReconnect, status, inputCode, connectToOverlay]);
 
-  // Immediate Reconnect on Wake (Visibility Change)
   useEffect(() => {
       const handleVisibilityChange = () => {
           if (document.visibilityState === 'visible' && autoReconnect && status === 'DISCONNECTED') {
-              console.log("App Woke Up - Reconnecting immediately");
               connectToOverlay();
           }
       };
@@ -489,6 +505,9 @@ const ControlDeck: React.FC = () => {
 
   // --- TWITCH LOGIC ---
   useEffect(() => {
+    // Skip real Twitch connection in Demo Mode to avoid confusion, 
+    // or keep it running? Keeping it allows "mixing", but prompt suggests "Mock Data Sources".
+    // We'll keep it running if configured, but Demo Tools will inject mock data.
     let isMounted = true;
     let client: TwitchIRC | null = null;
     let followerInterval: number;
@@ -501,7 +520,6 @@ const ControlDeck: React.FC = () => {
             let fetchedUsername = undefined;
             let broadcasterId = '';
 
-            // 1. Validate Token & Get User Info
             try {
                 const res = await fetch('https://id.twitch.tv/oauth2/validate', {
                     headers: { 'Authorization': `OAuth ${cleanToken}` }
@@ -524,7 +542,6 @@ const ControlDeck: React.FC = () => {
                 console.warn("Token validation failed");
             }
 
-            // 2. Poll Followers (Simple implementation)
             const checkFollowers = async () => {
                 if (!broadcasterId) return;
                 try {
@@ -552,7 +569,6 @@ const ControlDeck: React.FC = () => {
             followerInterval = window.setInterval(checkFollowers, 60000); 
             checkFollowers();
 
-            // 3. Connect IRC
             client = new TwitchIRC(
                 cleanToken, 
                 twitchConfig.channel, 
@@ -622,14 +638,31 @@ const ControlDeck: React.FC = () => {
   const handleButtonPress = (btn: SoundItem) => {
       if (isEditMode) {
           setEditingButton(btn);
-      } else {
-          // Connected: Send to Overlay, Mute local (prevents echo)
-          if (status === 'CONNECTED') {
-              sendTriggerPayload(btn);
-          } else {
-              // Disconnected/Preview: Play Locally
-              playSynthSound(btn.soundPreset || btn.id, btn.soundUrl);
+          return;
+      }
+      
+      // Connected OR Demo Mode:
+      if (status === 'CONNECTED' || isDemoMode) {
+          // If Connected, send to remote
+          if (status === 'CONNECTED') sendTriggerPayload(btn);
+          
+          // If Demo Mode, also trigger local overlay and play sound locally
+          if (isDemoMode) {
+             const defaultSound = DEFAULT_SOUND_BOARD.find(s => s.id === btn.id);
+             triggerDemoAlert({ 
+                 type: 'sfx',
+                 label: btn.label || defaultSound?.label || 'ALERT',
+                 image: btn.imageUrl,
+                 fontStyle: btn.fontStyle || defaultSound?.fontStyle || 'standard',
+                 animation: btn.animation || defaultSound?.animation || 'bounce',
+                 color: btn.color || defaultSound?.color || 'bg-purple-600',
+                 textColor: btn.textColor
+             });
+             playSynthSound(btn.soundPreset || btn.id, btn.soundUrl);
           }
+      } else {
+          // Disconnected/Offline: Play Locally only
+          playSynthSound(btn.soundPreset || btn.id, btn.soundUrl);
       }
   };
 
@@ -637,9 +670,20 @@ const ControlDeck: React.FC = () => {
       if (status === 'CONNECTED') {
           sendTriggerPayload(btn);
       } else {
-          // If not connected, just play local
           playSynthSound(btn.soundPreset || btn.id, btn.soundUrl);
-          alert('Not connected to Overlay. Playing locally.');
+          if (!isDemoMode) alert('Not connected. Playing locally.');
+      }
+      
+      if (isDemoMode) {
+          triggerDemoAlert({
+             type: 'sfx',
+             label: btn.label,
+             image: btn.imageUrl,
+             fontStyle: btn.fontStyle,
+             animation: btn.animation,
+             color: btn.color,
+             textColor: btn.textColor
+          });
       }
   };
 
@@ -671,6 +715,11 @@ const ControlDeck: React.FC = () => {
 
   const showChatOnStream = (msg: ChatMessage) => {
       if (conn && conn.open) conn.send({ type: 'SHOW_CHAT_MSG', msg });
+      
+      if (isDemoMode) {
+          triggerDemoAlert({ type: 'chat', chatMsg: msg });
+          playSynthSound('ui-pop');
+      }
   };
 
   const dismissEvent = (id: string) => {
@@ -689,7 +738,7 @@ const ControlDeck: React.FC = () => {
   }
 
   // Connect Screen
-  if (status !== 'CONNECTED' && !autoReconnect) {
+  if (status !== 'CONNECTED' && !autoReconnect && !isDemoMode) {
       return (
           <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4">
               <div className="w-full max-w-sm bg-gray-800 rounded-2xl p-6 shadow-2xl border border-gray-700">
@@ -707,8 +756,9 @@ const ControlDeck: React.FC = () => {
                     <button onClick={() => setInputCode(p => p.slice(0, -1))} className="h-16 rounded-lg bg-yellow-900/50 hover:bg-yellow-900/70 text-yellow-200 font-bold border-b-4 border-yellow-900/50 active:border-b-0 active:mt-1">DEL</button>
                   </div>
                   <button onClick={connectToOverlay} disabled={inputCode.length !== 4 || status === 'CONNECTING'} className="w-full py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-purple-900/50">{status === 'CONNECTING' ? 'Connecting...' : 'CONNECT'}</button>
-                  <div className="mt-6 pt-6 border-t border-gray-700 text-center">
-                    <button onClick={() => window.location.hash = '/overlay'} className="inline-flex items-center text-purple-400 hover:text-purple-300 text-sm font-semibold"><Monitor className="w-4 h-4 mr-2" /> Launch Overlay Mode</button>
+                  <div className="mt-6 pt-6 border-t border-gray-700 flex flex-col gap-3 text-center">
+                    <button onClick={() => setIsDemoMode(true)} className="w-full py-3 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold text-sm text-yellow-500 border border-yellow-500/30 flex items-center justify-center"><FlaskConical className="w-4 h-4 mr-2" /> Enter Demo Mode</button>
+                    <button onClick={() => window.location.hash = '/overlay'} className="inline-flex items-center justify-center text-purple-400 hover:text-purple-300 text-sm font-semibold"><Monitor className="w-4 h-4 mr-2" /> Launch Overlay Mode</button>
                   </div>
               </div>
           </div>
@@ -716,30 +766,42 @@ const ControlDeck: React.FC = () => {
   }
 
   // --- MAIN UI ---
-  // LAYOUT FIX: Used min-h-screen instead of fixed h-screen.
-  // Sidebar is sticky on desktop/tablet to stay visible while buttons scroll.
-  // Document body scrolling is enabled to handle address bars/safe areas.
   return (
     <div className="w-full min-h-screen flex flex-col md:flex-row bg-gray-900 text-white relative">
       
-      {/* Sidebar: Chat / Events / Tools */}
-      {/* Mobile: h-[50vh] scrollable area. Desktop: h-screen sticky to top. */}
-      <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-[50vh] md:h-[100dvh] md:sticky md:top-0 z-10 shadow-xl">
+      {/* DEMO OVERLAY PREVIEW LAYER */}
+      {isDemoMode && (
+          <div className="fixed inset-0 z-50 pointer-events-none">
+              <OverlayDisplay activeAlert={demoActiveAlert} activePoll={poll} isDemo={true} />
+          </div>
+      )}
+
+      {/* Sidebar */}
+      <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-[50vh] md:h-[100dvh] md:sticky md:top-0 z-40 shadow-xl">
          
          {/* Top Status */}
          <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900 flex-shrink-0">
-            {status === 'CONNECTED' ? (
-                <div className="flex items-center gap-2 text-green-400 font-bold text-xs"><Wifi className="w-3 h-3" /> Connected</div>
+            {isDemoMode ? (
+                <div className="flex items-center gap-2 text-yellow-500 font-bold text-xs animate-pulse px-2 py-1 bg-yellow-900/30 rounded border border-yellow-500/50">
+                    <FlaskConical className="w-3 h-3" /> DEMO MODE
+                </div>
             ) : (
-                <div className="flex items-center gap-2 text-yellow-400 font-bold text-xs animate-pulse"><RefreshCw className="w-3 h-3 animate-spin" /> Reconnecting...</div>
+                status === 'CONNECTED' ? (
+                    <div className="flex items-center gap-2 text-green-400 font-bold text-xs"><Wifi className="w-3 h-3" /> Connected</div>
+                ) : (
+                    <div className="flex items-center gap-2 text-yellow-400 font-bold text-xs animate-pulse"><RefreshCw className="w-3 h-3 animate-spin" /> Reconnecting...</div>
+                )
             )}
             
             <div className="flex gap-2 items-center">
+                 <button onClick={() => setIsDemoMode(!isDemoMode)} className={`p-1 rounded text-xs font-bold ${isDemoMode ? 'text-yellow-500 bg-yellow-900/30' : 'text-gray-500 hover:text-white'}`} title="Toggle Demo Mode">
+                     {isDemoMode ? 'EXIT DEMO' : 'DEMO'}
+                 </button>
                  <button onClick={toggleFullscreen} className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700" title="Toggle Fullscreen">
                      {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                  </button>
                  <button onClick={() => setShowSettings(true)} className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700"><SettingsIcon className="w-4 h-4"/></button>
-                 <button onClick={() => { setConn(null); setStatus('DISCONNECTED'); setAutoReconnect(false); }} className="text-xs text-red-400 hover:text-red-300 ml-1">Disconnect</button>
+                 <button onClick={() => { setConn(null); setStatus('DISCONNECTED'); setAutoReconnect(false); setIsDemoMode(false); }} className="text-xs text-red-400 hover:text-red-300 ml-1">Disconnect</button>
             </div>
          </div>
          
@@ -749,10 +811,13 @@ const ControlDeck: React.FC = () => {
          </div>
 
          {/* Tabs */}
-         <div className="flex border-b border-gray-700 bg-gray-900 text-xs font-bold uppercase tracking-wider flex-shrink-0">
-             <button onClick={() => setActiveTab('chat')} className={`flex-1 py-3 text-center ${activeTab === 'chat' ? 'text-purple-400 border-b-2 border-purple-500 bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>Chat</button>
-             <button onClick={() => setActiveTab('events')} className={`flex-1 py-3 text-center ${activeTab === 'events' ? 'text-pink-400 border-b-2 border-pink-500 bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>Events {events.filter(e => !e.seen).length > 0 && <span className="ml-1 w-2 h-2 bg-pink-500 rounded-full inline-block"/>}</button>
-             <button onClick={() => setActiveTab('tools')} className={`flex-1 py-3 text-center ${activeTab === 'tools' ? 'text-blue-400 border-b-2 border-blue-500 bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>Tools</button>
+         <div className="flex border-b border-gray-700 bg-gray-900 text-xs font-bold uppercase tracking-wider flex-shrink-0 overflow-x-auto">
+             <button onClick={() => setActiveTab('chat')} className={`flex-1 py-3 text-center min-w-[60px] ${activeTab === 'chat' ? 'text-purple-400 border-b-2 border-purple-500 bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>Chat</button>
+             <button onClick={() => setActiveTab('events')} className={`flex-1 py-3 text-center min-w-[60px] ${activeTab === 'events' ? 'text-pink-400 border-b-2 border-pink-500 bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>Events {events.filter(e => !e.seen).length > 0 && <span className="ml-1 w-2 h-2 bg-pink-500 rounded-full inline-block"/>}</button>
+             <button onClick={() => setActiveTab('tools')} className={`flex-1 py-3 text-center min-w-[60px] ${activeTab === 'tools' ? 'text-blue-400 border-b-2 border-blue-500 bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>Tools</button>
+             {isDemoMode && (
+                 <button onClick={() => setActiveTab('demo')} className={`flex-1 py-3 text-center min-w-[60px] ${activeTab === 'demo' ? 'text-yellow-500 border-b-2 border-yellow-500 bg-gray-800' : 'text-yellow-700 hover:text-yellow-500'}`}>Demo</button>
+             )}
          </div>
 
          {/* Content Area */}
@@ -777,16 +842,24 @@ const ControlDeck: React.FC = () => {
              {activeTab === 'tools' && (
                  <PollTool activePoll={poll} onCreate={startPoll} onEnd={endPoll} />
              )}
+
+             {activeTab === 'demo' && isDemoMode && (
+                 <DemoTools 
+                    onAddChat={handleDemoMockChat} 
+                    onAddEvent={handleDemoMockEvent} 
+                    onStartPoll={handleDemoPoll}
+                    onVotePoll={handleDemoVote}
+                 />
+             )}
          </div>
       </div>
 
       {/* Main Button Grid */}
-      <div className="flex-1 p-4 bg-gray-900/95 flex flex-col">
+      <div className="flex-1 p-4 bg-gray-900/95 flex flex-col z-0">
          <div className="flex justify-between items-center mb-4 flex-shrink-0">
              <h1 className="text-xl font-bold text-gray-400 flex items-center gap-2"><Volume2 className="w-5 h-5" /> Soundboard</h1>
              <div className="flex items-center gap-2">
-                 {/* Duplicated connect status in main area for better mobile visibility */}
-                 {status !== 'CONNECTED' && (
+                 {status !== 'CONNECTED' && !isDemoMode && (
                      <div className="text-xs text-yellow-500 font-bold animate-pulse px-2 flex items-center gap-1 border border-yellow-500/50 rounded bg-yellow-900/20">
                          <WifiOff className="w-3 h-3"/> Reconnecting...
                      </div>
