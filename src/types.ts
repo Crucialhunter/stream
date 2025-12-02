@@ -1,3 +1,4 @@
+
 export type AppMode = 'CONTROL' | 'OVERLAY' | 'SETTINGS';
 
 export type FontStyle = 'standard' | 'retro' | 'scifi' | 'comic' | 'horror' | 'handwritten';
@@ -65,6 +66,7 @@ export interface TwitchConfig {
   accessToken: string;
   channel: string;
   viewerUpdateInterval?: number; // seconds
+  preventSleep?: boolean; // New: Wake Lock preference
 }
 
 // P2P Message Types

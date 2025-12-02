@@ -1,6 +1,8 @@
+
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Peer, DataConnection } from 'peerjs';
-import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, MessageSquarePlus, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, MessageSquare, Layers, Music, Type, Image as ImageIcon, Play, Save } from 'lucide-react';
+import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, MessageSquarePlus, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, MessageSquare, Layers, Music, Type, Image as ImageIcon, Play, Save, WifiOff } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD, SOUND_LIBRARY, FONT_STYLES, ANIMATION_STYLES } from '../constants';
 import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState, PollOption } from '../types';
@@ -305,7 +307,7 @@ const ControlDeck: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [twitchConfig, setTwitchConfig] = useState<TwitchConfig>(() => {
     const saved = localStorage.getItem('twitch_config');
-    return saved ? JSON.parse(saved) : { clientId: '', accessToken: '', channel: '' };
+    return saved ? JSON.parse(saved) : { clientId: '', accessToken: '', channel: '', preventSleep: false };
   });
 
   // Sidebar Tab State
@@ -328,6 +330,11 @@ const ControlDeck: React.FC = () => {
   const [conn, setConn] = useState<DataConnection | null>(null);
   const [inputCode, setInputCode] = useState('');
   const [status, setStatus] = useState<'DISCONNECTED' | 'CONNECTING' | 'CONNECTED'>('DISCONNECTED');
+  const [autoReconnect, setAutoReconnect] = useState(false);
+
+  // UI State
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   // Chat State
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -347,6 +354,72 @@ const ControlDeck: React.FC = () => {
     setLogs(prev => [...prev.slice(-99), `[${timestamp}] ${type === 'in' ? '< ' : type === 'out' ? '> ' : ''}${msg}`]);
   }, []);
 
+  // --- WAKE LOCK LOGIC ---
+  const requestWakeLock = async () => {
+      if ('wakeLock' in navigator) {
+          try {
+              const sentinel = await navigator.wakeLock.request('screen');
+              wakeLockRef.current = sentinel;
+              console.log('Wake Lock active');
+              sentinel.addEventListener('release', () => {
+                  console.log('Wake Lock released');
+                  wakeLockRef.current = null;
+              });
+          } catch (err: any) {
+              console.error(`${err.name}, ${err.message}`);
+          }
+      }
+  };
+
+  const releaseWakeLock = async () => {
+      if (wakeLockRef.current) {
+          await wakeLockRef.current.release();
+          wakeLockRef.current = null;
+      }
+  };
+
+  // Handle Wake Lock based on config and visibility
+  useEffect(() => {
+      const handleVisibilityChange = () => {
+          if (document.visibilityState === 'visible' && twitchConfig.preventSleep) {
+              requestWakeLock();
+          }
+      };
+
+      if (twitchConfig.preventSleep) {
+          requestWakeLock();
+          document.addEventListener('visibilitychange', handleVisibilityChange);
+      } else {
+          releaseWakeLock();
+      }
+
+      return () => {
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          releaseWakeLock();
+      };
+  }, [twitchConfig.preventSleep]);
+
+  // --- FULLSCREEN LOGIC ---
+  const toggleFullscreen = () => {
+      const doc = window.document as any;
+      const docEl = document.documentElement as any;
+
+      const requestFullScreen = docEl.requestFullscreen || docEl.mozRequestFullScreen || docEl.webkitRequestFullScreen || docEl.msRequestFullscreen;
+      const cancelFullScreen = doc.exitFullscreen || doc.mozCancelFullScreen || doc.webkitExitFullscreen || doc.msExitFullscreen;
+      
+      const isActive = doc.fullscreenElement || doc.mozFullScreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement;
+
+      if (!isActive) {
+        if (requestFullScreen) {
+            requestFullScreen.call(docEl).then(() => setIsFullscreen(true)).catch(console.error);
+        }
+      } else {
+        if (cancelFullScreen) {
+            cancelFullScreen.call(doc).then(() => setIsFullscreen(false)).catch(console.error);
+        }
+      }
+  };
+
   // --- INITIALIZATION ---
   useEffect(() => {
     const p = new Peer(); 
@@ -358,6 +431,61 @@ const ControlDeck: React.FC = () => {
   useEffect(() => {
       localStorage.setItem('sound_buttons', JSON.stringify(soundButtons));
   }, [soundButtons]);
+
+  // --- CONNECTION & RECONNECTION LOGIC ---
+  const connectToOverlay = useCallback(() => {
+    if (!peer || inputCode.length !== 4) return;
+    
+    // Don't connect if already connected (avoid duplicate connections)
+    if (conn && conn.open) return;
+
+    console.log("Attempting Connection...");
+    setStatus('CONNECTING');
+    const destId = `${PEER_ID_PREFIX}${inputCode}`;
+    const connection = peer.connect(destId);
+
+    connection.on('open', () => { 
+        console.log("Connected!");
+        setStatus('CONNECTED'); 
+        setConn(connection);
+        setAutoReconnect(true); // Enable auto-reconnect once we've had a success
+    });
+
+    connection.on('close', () => { 
+        console.log("Connection Closed");
+        setStatus('DISCONNECTED'); 
+        setConn(null); 
+    });
+
+    connection.on('error', (err) => { 
+        console.error("Connection Error", err);
+        setStatus('DISCONNECTED'); 
+        setConn(null); 
+    });
+  }, [peer, inputCode, conn]);
+
+  // Auto-Reconnect Interval
+  useEffect(() => {
+    let interval: number;
+    if (autoReconnect && status === 'DISCONNECTED' && inputCode.length === 4) {
+        console.log("Auto-reconnecting...");
+        interval = window.setInterval(connectToOverlay, 3000); // Try every 3 seconds
+    }
+    return () => clearInterval(interval);
+  }, [autoReconnect, status, inputCode, connectToOverlay]);
+
+  // Immediate Reconnect on Wake (Visibility Change)
+  useEffect(() => {
+      const handleVisibilityChange = () => {
+          if (document.visibilityState === 'visible' && autoReconnect && status === 'DISCONNECTED') {
+              console.log("App Woke Up - Reconnecting immediately");
+              connectToOverlay();
+          }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [autoReconnect, status, connectToOverlay]);
+
 
   // --- TWITCH LOGIC ---
   useEffect(() => {
@@ -474,17 +602,6 @@ const ControlDeck: React.FC = () => {
     };
   }, [twitchConfig.accessToken, twitchConfig.channel]);
 
-  // --- ACTIONS ---
-  const connectToOverlay = () => {
-    if (!peer || inputCode.length !== 4) return;
-    setStatus('CONNECTING');
-    const destId = `${PEER_ID_PREFIX}${inputCode}`;
-    const connection = peer.connect(destId);
-    connection.on('open', () => { setStatus('CONNECTED'); setConn(connection); });
-    connection.on('close', () => { setStatus('DISCONNECTED'); setConn(null); });
-    connection.on('error', () => { setStatus('DISCONNECTED'); setConn(null); alert('Connection failed'); });
-  };
-
   const sendTriggerPayload = (btn: SoundItem) => {
       if (conn && status === 'CONNECTED') {
           conn.send({ 
@@ -562,11 +679,17 @@ const ControlDeck: React.FC = () => {
 
   // --- RENDER HELPERS ---
   if (showSettings) {
-    return <Settings config={twitchConfig} onSave={(cfg) => { setTwitchConfig(cfg); localStorage.setItem('twitch_config', JSON.stringify(cfg)); }} onBack={() => setShowSettings(false)} />;
+    return <Settings 
+      config={twitchConfig} 
+      onSave={(cfg) => { setTwitchConfig(cfg); localStorage.setItem('twitch_config', JSON.stringify(cfg)); }} 
+      onBack={() => setShowSettings(false)} 
+      isFullscreen={isFullscreen}
+      toggleFullscreen={toggleFullscreen}
+    />;
   }
 
   // Connect Screen
-  if (status !== 'CONNECTED') {
+  if (status !== 'CONNECTED' && !autoReconnect) {
       return (
           <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4">
               <div className="w-full max-w-sm bg-gray-800 rounded-2xl p-6 shadow-2xl border border-gray-700">
@@ -593,18 +716,24 @@ const ControlDeck: React.FC = () => {
   }
 
   // --- MAIN UI ---
+  // Use h-[100dvh] to fix mobile browser bar layout issues
   return (
-    <div className="h-screen flex flex-col md:flex-row bg-gray-900 text-white overflow-hidden relative">
+    <div className="h-[100dvh] flex flex-col md:flex-row bg-gray-900 text-white overflow-hidden relative">
       
       {/* Sidebar: Chat / Events / Tools */}
       <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-1/2 md:h-full z-10">
          
          {/* Top Status */}
          <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900">
-            <div className="flex items-center gap-2 text-green-400 font-bold text-xs"><Wifi className="w-3 h-3" /> Connected</div>
+            {status === 'CONNECTED' ? (
+                <div className="flex items-center gap-2 text-green-400 font-bold text-xs"><Wifi className="w-3 h-3" /> Connected</div>
+            ) : (
+                <div className="flex items-center gap-2 text-yellow-400 font-bold text-xs animate-pulse"><RefreshCw className="w-3 h-3 animate-spin" /> Reconnecting...</div>
+            )}
+            
             <div className="flex gap-2">
                  <button onClick={() => setShowSettings(true)} className="text-gray-400 hover:text-white"><SettingsIcon className="w-4 h-4"/></button>
-                 <button onClick={() => { setConn(null); setStatus('DISCONNECTED'); }} className="text-xs text-red-400 hover:text-red-300">Disconnect</button>
+                 <button onClick={() => { setConn(null); setStatus('DISCONNECTED'); setAutoReconnect(false); }} className="text-xs text-red-400 hover:text-red-300">Disconnect</button>
             </div>
          </div>
          
@@ -649,12 +778,20 @@ const ControlDeck: React.FC = () => {
       <div className="flex-1 p-4 overflow-y-auto bg-gray-900/95 flex flex-col">
          <div className="flex justify-between items-center mb-4">
              <h1 className="text-xl font-bold text-gray-400 flex items-center gap-2"><Volume2 className="w-5 h-5" /> Soundboard</h1>
-             <button 
-                onClick={() => setIsEditMode(!isEditMode)} 
-                className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition ${isEditMode ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500 animate-pulse' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}
-             >
-                 <Edit2 className="w-3 h-3" /> {isEditMode ? 'Done Editing' : 'Edit Buttons'}
-             </button>
+             <div className="flex items-center gap-2">
+                 {/* Duplicated connect status in main area for better mobile visibility */}
+                 {status !== 'CONNECTED' && (
+                     <div className="text-xs text-yellow-500 font-bold animate-pulse px-2 flex items-center gap-1 border border-yellow-500/50 rounded bg-yellow-900/20">
+                         <WifiOff className="w-3 h-3"/> Reconnecting...
+                     </div>
+                 )}
+                 <button 
+                    onClick={() => setIsEditMode(!isEditMode)} 
+                    className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition ${isEditMode ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500 animate-pulse' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}
+                 >
+                     <Edit2 className="w-3 h-3" /> {isEditMode ? 'Done Editing' : 'Edit Buttons'}
+                 </button>
+             </div>
          </div>
          
          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 flex-1 content-start pb-20">
