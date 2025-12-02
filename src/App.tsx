@@ -34,6 +34,18 @@ const App: React.FC = () => {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  // OBS TRANSPARENCY FIX
+  // Dynamically set the body background based on the active route.
+  useEffect(() => {
+    if (route === 'overlay') {
+      document.body.style.backgroundColor = 'transparent';
+      document.documentElement.style.backgroundColor = 'transparent';
+    } else {
+      document.body.style.backgroundColor = '#111827'; // bg-gray-900
+      document.documentElement.style.backgroundColor = '#111827';
+    }
+  }, [route]);
+
   if (route === 'overlay') {
     return <Overlay />;
   }

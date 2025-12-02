@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Peer } from 'peerjs';
 import { ArrowLeft, Volume2 } from 'lucide-react';
-import { PeerPayload, ChatMessage, PollState, ActiveAlert } from '../types';
+import { PeerPayload, PollState, ActiveAlert } from '../types';
 import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD } from '../constants';
 import { playSynthSound, unlockAudio } from '../services/audioService';
 import OverlayDisplay from './OverlayDisplay';
@@ -89,50 +89,59 @@ const Overlay: React.FC = () => {
     }
   };
 
-  // --- AUDIO UNLOCK OVERLAY ---
+  // --- AUDIO UNLOCK OVERLAY (Floating Card) ---
   if (!audioEnabled) {
       return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 text-white cursor-pointer" onClick={handleManualAudioUnlock}>
-              <div className="text-center animate-bounce">
-                  <div className="bg-purple-600 p-6 rounded-full inline-flex mb-4 shadow-[0_0_50px_rgba(168,85,247,0.5)]">
-                      <Volume2 className="w-16 h-16 text-white" />
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-transparent" onClick={handleManualAudioUnlock}>
+              <div className="bg-gray-900/95 border-2 border-purple-500 p-8 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] flex flex-col items-center animate-bounce cursor-pointer backdrop-blur-md">
+                  <div className="bg-purple-600 p-4 rounded-full mb-4 shadow-lg">
+                      <Volume2 className="w-12 h-12 text-white" />
                   </div>
-                  <h1 className="text-3xl font-black uppercase tracking-widest">Click to Enable Audio</h1>
-                  <p className="text-gray-400 mt-2">Required for OBS/Browser Autoplay</p>
+                  <h1 className="text-2xl font-black uppercase tracking-widest text-white">Enable Audio</h1>
+                  <p className="text-gray-400 mt-2 text-sm">Click anywhere to start</p>
               </div>
           </div>
       );
   }
 
-  // Render Display Component
+  // Render Display Component (Alerts / Polls)
   if (activeAlert || activePoll) {
       return <OverlayDisplay activeAlert={activeAlert} activePoll={activePoll} />;
   }
 
-  // Setup Screen (Hidden when configured in OBS usually, but visible if no connection)
+  // --- SETUP SCREEN (Floating Card / Idle State) ---
   return (
-    <div className="w-screen h-screen flex flex-col items-center justify-center bg-gray-900/80 backdrop-blur-sm text-white relative font-sans">
+    <div className="w-screen h-screen flex flex-col items-center justify-center bg-transparent text-white relative font-sans">
       {!isConnected ? (
-        <>
-            <button 
-                onClick={() => window.location.hash = ''} 
-                className="absolute top-6 left-6 flex items-center text-gray-400 hover:text-white transition"
-            >
-                <ArrowLeft className="w-5 h-5 mr-2" /> Back to Controls
-            </button>
+        // Not Connected: Show Pairing Code Card
+        <div className="bg-gray-900/90 p-8 rounded-3xl border border-gray-700 shadow-2xl backdrop-blur-md flex flex-col items-center max-w-sm mx-4">
+             <div className="w-full flex justify-start mb-4">
+                <button 
+                    onClick={() => window.location.hash = ''} 
+                    className="flex items-center text-gray-400 hover:text-white transition text-xs font-bold uppercase tracking-wider"
+                >
+                    <ArrowLeft className="w-4 h-4 mr-2" /> Back
+                </button>
+             </div>
 
-            <h2 className="text-2xl font-bold mb-4 uppercase tracking-widest text-gray-400">Overlay Setup</h2>
-            <div className="bg-black/50 p-8 rounded-2xl border-2 border-purple-500/50 backdrop-blur-xl">
-                <p className="text-gray-400 mb-2 text-center uppercase text-xs font-bold">Pairing Code</p>
-                <div className="text-8xl font-mono font-bold tracking-widest text-purple-400">
+            <h2 className="text-xl font-bold mb-6 uppercase tracking-widest text-gray-300">Overlay Setup</h2>
+            
+            <div className="bg-black/40 p-6 rounded-2xl border-2 border-purple-500/50 backdrop-blur-xl w-full text-center">
+                <p className="text-gray-400 mb-2 uppercase text-[10px] font-bold tracking-widest">Pairing Code</p>
+                <div className="text-6xl font-mono font-bold tracking-widest text-purple-400">
                 {code || '....'}
                 </div>
             </div>
-        </>
+            
+            <p className="mt-6 text-gray-500 text-xs text-center max-w-[200px]">
+                Enter this code on your Control Deck to pair.
+            </p>
+        </div>
       ) : (
-          <div className="absolute bottom-4 right-4 flex items-center gap-2 opacity-50">
-              <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-xs font-mono uppercase">System Ready</span>
+          // Connected & Idle: Minimal "System Ready" Badge
+          <div className="absolute bottom-4 right-4 flex items-center gap-2 px-3 py-1 bg-black/40 rounded-full backdrop-blur-md border border-white/10 shadow-lg">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_#22c55e]"></div>
+              <span className="text-[10px] font-mono uppercase text-gray-300">System Ready</span>
           </div>
       )}
     </div>

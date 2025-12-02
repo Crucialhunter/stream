@@ -32,8 +32,7 @@
         /* Allow native document scrolling */
         overflow-y: auto;
         overflow-x: hidden;
-        background-color: #111827; /* bg-gray-900 */
-        color: white;
+        /* Background is now managed by App.tsx (Transparent for Overlay, Dark for Control) */
       }
 
       #root {
@@ -109,7 +108,7 @@
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="bg-gray-900 text-white">
+  <body class="text-white">
     <div id="root"></div>
     <script type="module" src="/src/index.tsx"></script>
   <script type="module" src="/index.tsx"></script>
