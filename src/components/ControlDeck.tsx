@@ -1,11 +1,10 @@
 
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Peer, DataConnection } from 'peerjs';
-import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, MessageSquarePlus, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, MessageSquare, Layers, Music, Type, Image as ImageIcon, Play, Save, WifiOff } from 'lucide-react';
+import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, MessageSquare, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD, SOUND_LIBRARY, FONT_STYLES, ANIMATION_STYLES } from '../constants';
-import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState, PollOption } from '../types';
+import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState } from '../types';
 import { TwitchIRC } from '../services/twitchIRC';
 import { playSynthSound } from '../services/audioService';
 import ChatMonitor from './ChatMonitor';
@@ -716,48 +715,51 @@ const ControlDeck: React.FC = () => {
   }
 
   // --- MAIN UI ---
-  // Use h-[100dvh] to fix mobile browser bar layout issues
+  // Using fixed inset-0 to prevent body scrolling when input is focused on tablets
   return (
-    <div className="h-[100dvh] flex flex-col md:flex-row bg-gray-900 text-white overflow-hidden relative">
+    <div className="fixed inset-0 h-[100dvh] w-full overflow-hidden overscroll-none flex flex-col md:flex-row bg-gray-900 text-white relative touch-none">
       
       {/* Sidebar: Chat / Events / Tools */}
-      <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-1/2 md:h-full z-10">
+      <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-1/2 md:h-full z-10 shadow-xl">
          
          {/* Top Status */}
-         <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+         <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900 flex-shrink-0">
             {status === 'CONNECTED' ? (
                 <div className="flex items-center gap-2 text-green-400 font-bold text-xs"><Wifi className="w-3 h-3" /> Connected</div>
             ) : (
                 <div className="flex items-center gap-2 text-yellow-400 font-bold text-xs animate-pulse"><RefreshCw className="w-3 h-3 animate-spin" /> Reconnecting...</div>
             )}
             
-            <div className="flex gap-2">
-                 <button onClick={() => setShowSettings(true)} className="text-gray-400 hover:text-white"><SettingsIcon className="w-4 h-4"/></button>
-                 <button onClick={() => { setConn(null); setStatus('DISCONNECTED'); setAutoReconnect(false); }} className="text-xs text-red-400 hover:text-red-300">Disconnect</button>
+            <div className="flex gap-2 items-center">
+                 <button onClick={toggleFullscreen} className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700" title="Toggle Fullscreen">
+                     {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                 </button>
+                 <button onClick={() => setShowSettings(true)} className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700"><SettingsIcon className="w-4 h-4"/></button>
+                 <button onClick={() => { setConn(null); setStatus('DISCONNECTED'); setAutoReconnect(false); }} className="text-xs text-red-400 hover:text-red-300 ml-1">Disconnect</button>
             </div>
          </div>
          
          {/* Viewer Counter */}
-         <div className="px-2 pt-2 bg-gray-900">
+         <div className="px-2 pt-2 bg-gray-900 flex-shrink-0">
             <ViewerCounter config={twitchConfig} />
          </div>
 
          {/* Tabs */}
-         <div className="flex border-b border-gray-700 bg-gray-900 text-xs font-bold uppercase tracking-wider">
+         <div className="flex border-b border-gray-700 bg-gray-900 text-xs font-bold uppercase tracking-wider flex-shrink-0">
              <button onClick={() => setActiveTab('chat')} className={`flex-1 py-3 text-center ${activeTab === 'chat' ? 'text-purple-400 border-b-2 border-purple-500 bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>Chat</button>
              <button onClick={() => setActiveTab('events')} className={`flex-1 py-3 text-center ${activeTab === 'events' ? 'text-pink-400 border-b-2 border-pink-500 bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>Events {events.filter(e => !e.seen).length > 0 && <span className="ml-1 w-2 h-2 bg-pink-500 rounded-full inline-block"/>}</button>
              <button onClick={() => setActiveTab('tools')} className={`flex-1 py-3 text-center ${activeTab === 'tools' ? 'text-blue-400 border-b-2 border-blue-500 bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>Tools</button>
          </div>
 
          {/* Content Area */}
-         <div className="flex-1 overflow-hidden bg-gray-900 flex flex-col p-2">
+         <div className="flex-1 overflow-hidden bg-gray-900 flex flex-col p-2 min-h-0">
              {activeTab === 'chat' && (
                  <>
                     <div className="flex-1 overflow-hidden relative">
                         <ChatMonitor messages={chatMessages} lastMessageTime={lastMsgTime} onShowOnStream={showChatOnStream} />
                     </div>
                     {/* Chat Input Area */}
-                    <form onSubmit={(e) => { e.preventDefault(); if(chatInput.trim() && ircClient) { ircClient.sendMessage(chatInput); setChatInput(''); }}} className="mt-2 flex gap-1">
+                    <form onSubmit={(e) => { e.preventDefault(); if(chatInput.trim() && ircClient) { ircClient.sendMessage(chatInput); setChatInput(''); }}} className="mt-2 flex gap-1 flex-shrink-0">
                         <input className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-2 text-xs focus:outline-none focus:border-purple-500" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Send message..." />
                         <button type="submit" className="bg-purple-600 px-3 rounded text-white"><Send className="w-3 h-3" /></button>
                     </form>
@@ -775,8 +777,8 @@ const ControlDeck: React.FC = () => {
       </div>
 
       {/* Main Button Grid */}
-      <div className="flex-1 p-4 overflow-y-auto bg-gray-900/95 flex flex-col">
-         <div className="flex justify-between items-center mb-4">
+      <div className="flex-1 p-4 overflow-y-auto bg-gray-900/95 flex flex-col touch-pan-y">
+         <div className="flex justify-between items-center mb-4 flex-shrink-0">
              <h1 className="text-xl font-bold text-gray-400 flex items-center gap-2"><Volume2 className="w-5 h-5" /> Soundboard</h1>
              <div className="flex items-center gap-2">
                  {/* Duplicated connect status in main area for better mobile visibility */}
