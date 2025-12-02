@@ -1,6 +1,7 @@
 import { SoundItem } from './types';
 
 export const PEER_ID_PREFIX = 'streamdeck-app-v1-';
+export const SYNC_PEER_PREFIX = 'streamdeck-sync-v1-';
 
 export const FONT_STYLES = [
   { id: 'standard', label: 'Standard', family: 'ui-sans-serif, system-ui' },

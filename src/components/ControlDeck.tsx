@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Peer, DataConnection } from 'peerjs';
-import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize, FlaskConical, PlayCircle, UserPlus, Users, MessageSquarePlus, Zap } from 'lucide-react';
+import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize, FlaskConical, PlayCircle, UserPlus, Users, MessageSquarePlus, Zap, Info } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD, SOUND_LIBRARY, FONT_STYLES, ANIMATION_STYLES } from '../constants';
 import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState, ActiveAlert } from '../types';
 import { TwitchIRC } from '../services/twitchIRC';
 import { playSynthSound } from '../services/audioService';
 import { generateMockChat, generateMockEvent, generateMockPoll } from '../services/mockService';
+import { loadConfigFromStorage, saveConfigToStorage } from '../services/configService';
 import ChatMonitor from './ChatMonitor';
 import ViewerCounter from './ViewerCounter';
 import Settings from './Settings';
@@ -155,10 +156,17 @@ const ButtonEditor: React.FC<{
     button: SoundItem, 
     onSave: (btn: SoundItem) => void, 
     onCancel: () => void,
-    onTest: (btn: SoundItem) => void
-}> = ({ button, onSave, onCancel, onTest }) => {
+    onTest: (btn: SoundItem) => void,
+    onDelete: (id: string) => void
+}> = ({ button, onSave, onCancel, onTest, onDelete }) => {
     const [edited, setEdited] = useState<SoundItem>(button);
     const [tab, setTab] = useState<'style' | 'audio' | 'visual'>('style');
+
+    const handleConfirmDelete = () => {
+        if (confirm("Are you sure you want to delete this button?")) {
+            onDelete(button.id);
+        }
+    };
 
     return (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -269,9 +277,11 @@ const ButtonEditor: React.FC<{
                     )}
                 </div>
                 <div className="p-4 border-t border-gray-700 bg-gray-800 rounded-b-2xl flex gap-3">
+                    <button onClick={handleConfirmDelete} className="px-4 bg-red-900/50 hover:bg-red-800 border border-red-800 text-red-300 rounded-lg font-bold" title="Delete Button">
+                        <Trash2 className="w-5 h-5" />
+                    </button>
                     <button onClick={() => onSave(edited)} className="flex-1 bg-green-600 hover:bg-green-500 py-3 rounded-lg font-bold text-lg flex items-center justify-center gap-2 shadow-lg shadow-green-900/50"><Save className="w-5 h-5"/> Save Changes</button>
                     <button onClick={() => onTest(edited)} className="px-6 bg-purple-600 hover:bg-purple-500 rounded-lg font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-purple-900/50"><Monitor className="w-5 h-5"/> Test</button>
-                    <button onClick={onCancel} className="px-6 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold text-gray-300">Cancel</button>
                 </div>
             </div>
         </div>
@@ -282,19 +292,14 @@ const ButtonEditor: React.FC<{
 // --- MAIN CONTROL DECK ---
 const ControlDeck: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
-  const [twitchConfig, setTwitchConfig] = useState<TwitchConfig>(() => {
-    const saved = localStorage.getItem('twitch_config');
-    return saved ? JSON.parse(saved) : { clientId: '', accessToken: '', channel: '', preventSleep: false };
-  });
-
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  
+  // App Data State
+  const [twitchConfig, setTwitchConfig] = useState<TwitchConfig>({ clientId: '', accessToken: '', channel: '', preventSleep: false });
+  const [soundButtons, setSoundButtons] = useState<SoundItem[]>(DEFAULT_SOUND_BOARD);
+  
   // Sidebar Tab State
   const [activeTab, setActiveTab] = useState<'chat' | 'events' | 'tools' | 'demo'>('chat');
-
-  // App Data State
-  const [soundButtons, setSoundButtons] = useState<SoundItem[]>(() => {
-      const saved = localStorage.getItem('sound_buttons');
-      return saved ? JSON.parse(saved) : DEFAULT_SOUND_BOARD;
-  });
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [poll, setPoll] = useState<PollState | null>(null);
 
@@ -335,6 +340,38 @@ const ControlDeck: React.FC = () => {
     const timestamp = new Date().toLocaleTimeString().split(' ')[0];
     setLogs(prev => [...prev.slice(-99), `[${timestamp}] ${type === 'in' ? '< ' : type === 'out' ? '> ' : ''}${msg}`]);
   }, []);
+
+  // --- PERSISTENCE & INITIALIZATION ---
+  useEffect(() => {
+      // 1. Load config from persistent storage
+      const loaded = loadConfigFromStorage();
+      if (loaded) {
+          setSoundButtons(loaded.soundButtons);
+          setTwitchConfig(loaded.twitchConfig);
+      }
+      
+      // 2. Check Onboarding
+      const seen = localStorage.getItem('onboarding_connect_seen');
+      if (!seen) setShowOnboarding(true);
+
+      // 3. Init Peer
+      const p = new Peer(); 
+      setPeer(p);
+      return () => p.destroy();
+  }, []);
+
+  // Save config whenever relevant state changes
+  useEffect(() => {
+      saveConfigToStorage({
+          soundButtons,
+          twitchConfig
+      });
+  }, [soundButtons, twitchConfig]);
+
+  const dismissOnboarding = () => {
+      setShowOnboarding(false);
+      localStorage.setItem('onboarding_connect_seen', '1');
+  };
 
   // --- DEMO MODE HELPERS ---
   const triggerDemoAlert = (alert: ActiveAlert) => {
@@ -447,17 +484,6 @@ const ControlDeck: React.FC = () => {
       }
   };
 
-  // --- INITIALIZATION ---
-  useEffect(() => {
-    const p = new Peer(); 
-    setPeer(p);
-    return () => p.destroy();
-  }, []);
-
-  useEffect(() => {
-      localStorage.setItem('sound_buttons', JSON.stringify(soundButtons));
-  }, [soundButtons]);
-
   // --- CONNECTION & RECONNECTION ---
   const connectToOverlay = useCallback(() => {
     if (!peer || inputCode.length !== 4) return;
@@ -505,9 +531,6 @@ const ControlDeck: React.FC = () => {
 
   // --- TWITCH LOGIC ---
   useEffect(() => {
-    // Skip real Twitch connection in Demo Mode to avoid confusion, 
-    // or keep it running? Keeping it allows "mixing", but prompt suggests "Mock Data Sources".
-    // We'll keep it running if configured, but Demo Tools will inject mock data.
     let isMounted = true;
     let client: TwitchIRC | null = null;
     let followerInterval: number;
@@ -534,7 +557,7 @@ const ControlDeck: React.FC = () => {
                         if (data.client_id !== twitchConfig.clientId) {
                              const newConfig = { ...twitchConfig, clientId: data.client_id };
                              setTwitchConfig(newConfig);
-                             localStorage.setItem('twitch_config', JSON.stringify(newConfig));
+                             // LocalStorage save handled by effect
                         }
                     }
                 }
@@ -692,6 +715,24 @@ const ControlDeck: React.FC = () => {
       setEditingButton(null);
   };
 
+  const deleteButton = (id: string) => {
+      setSoundButtons(prev => prev.filter(b => b.id !== id));
+      setEditingButton(null);
+  };
+
+  const addNewButton = () => {
+      const newBtn: SoundItem = {
+          id: `custom-${Date.now()}`,
+          label: 'NEW BUTTON',
+          color: 'bg-gray-700',
+          type: 'custom',
+          iconName: 'Zap',
+          animation: 'bounce',
+          fontStyle: 'standard'
+      };
+      setSoundButtons(prev => [...prev, newBtn]);
+  };
+
   // Poll Actions
   const startPoll = (q: string, opts: string[]) => {
       const newPoll: PollState = {
@@ -730,7 +771,9 @@ const ControlDeck: React.FC = () => {
   if (showSettings) {
     return <Settings 
       config={twitchConfig} 
-      onSave={(cfg) => { setTwitchConfig(cfg); localStorage.setItem('twitch_config', JSON.stringify(cfg)); }} 
+      soundButtons={soundButtons}
+      setTwitchConfig={setTwitchConfig}
+      setSoundButtons={setSoundButtons}
       onBack={() => setShowSettings(false)} 
       isFullscreen={isFullscreen}
       toggleFullscreen={toggleFullscreen}
@@ -740,8 +783,31 @@ const ControlDeck: React.FC = () => {
   // Connect Screen
   if (status !== 'CONNECTED' && !autoReconnect && !isDemoMode) {
       return (
-          <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4">
-              <div className="w-full max-w-sm bg-gray-800 rounded-2xl p-6 shadow-2xl border border-gray-700">
+          <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4 relative">
+              
+              {/* Onboarding Bubble for Connect Screen */}
+              {showOnboarding && (
+                  <div className="absolute z-50 top-4 right-4 md:right-auto md:top-auto md:mb-64 animate-bounce-in max-w-xs w-full">
+                      <div className="bg-gray-800 border-2 border-purple-500 rounded-xl p-4 shadow-2xl relative">
+                          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-gray-800 border-b-2 border-r-2 border-purple-500 rotate-45 transform"></div>
+                          <div className="flex items-start gap-3 mb-2">
+                             <div className="p-1 bg-purple-600 rounded-full"><Info className="w-5 h-5 text-white" /></div>
+                             <h3 className="font-bold text-lg leading-tight">How it works</h3>
+                          </div>
+                          <ul className="text-sm text-gray-300 space-y-2 mb-4 list-disc pl-4">
+                              <li>In your OBS overlay, you'll see a <b>4-digit code</b>.</li>
+                              <li>Type that code here and press <b>CONNECT</b>.</li>
+                              <li>Once connected, trigger sounds & alerts remotely.</li>
+                          </ul>
+                          <div className="text-xs text-gray-500 mb-3 border-t border-gray-700 pt-2">
+                              Config & Sync tools are in Settings.
+                          </div>
+                          <button onClick={dismissOnboarding} className="w-full py-2 bg-purple-600 hover:bg-purple-500 rounded-lg font-bold text-sm">Got it</button>
+                      </div>
+                  </div>
+              )}
+
+              <div className="w-full max-w-sm bg-gray-800 rounded-2xl p-6 shadow-2xl border border-gray-700 relative z-10">
                   <div className="flex justify-between items-center mb-6">
                       <h2 className="text-xl font-bold flex items-center"><Radio className="mr-2 text-purple-500" /> Connect Deck</h2>
                       <button onClick={() => setShowSettings(true)} className="p-2 hover:bg-gray-700 rounded-full"><SettingsIcon className="w-5 h-5 text-gray-400" /></button>
@@ -767,7 +833,7 @@ const ControlDeck: React.FC = () => {
 
   // --- MAIN UI ---
   return (
-    <div className="w-full min-h-screen flex flex-col md:flex-row bg-gray-900 text-white relative">
+    <div className="w-full h-screen flex flex-col md:flex-row bg-gray-900 text-white relative overflow-hidden">
       
       {/* DEMO OVERLAY PREVIEW LAYER */}
       {isDemoMode && (
@@ -777,7 +843,7 @@ const ControlDeck: React.FC = () => {
       )}
 
       {/* Sidebar */}
-      <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-[50vh] md:h-[100dvh] md:sticky md:top-0 z-40 shadow-xl">
+      <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-[50vh] md:h-full z-40 shadow-xl">
          
          {/* Top Status */}
          <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900 flex-shrink-0">
@@ -854,9 +920,11 @@ const ControlDeck: React.FC = () => {
          </div>
       </div>
 
-      {/* Main Button Grid */}
-      <div className="flex-1 p-4 bg-gray-900/95 flex flex-col z-0">
-         <div className="flex justify-between items-center mb-4 flex-shrink-0">
+      {/* Main Content (Button Grid) */}
+      <div className="flex-1 bg-gray-900/95 flex flex-col h-full overflow-hidden relative z-0">
+         
+         {/* Header */}
+         <div className="flex justify-between items-center p-4 bg-gray-900 border-b border-gray-800 flex-shrink-0">
              <h1 className="text-xl font-bold text-gray-400 flex items-center gap-2"><Volume2 className="w-5 h-5" /> Soundboard</h1>
              <div className="flex items-center gap-2">
                  {status !== 'CONNECTED' && !isDemoMode && (
@@ -873,26 +941,42 @@ const ControlDeck: React.FC = () => {
              </div>
          </div>
          
-         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 flex-1 content-start pb-20">
-            {soundButtons.map(sound => {
-                const IconComp = (Icons as any)[sound.iconName] || Icons.Zap;
-                return (
+         {/* Scrollable Grid */}
+         <div className="flex-1 overflow-y-auto p-4">
+             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-20">
+                {soundButtons.map(sound => {
+                    const IconComp = (Icons as any)[sound.iconName] || Icons.Zap;
+                    return (
+                        <button
+                            key={sound.id}
+                            onClick={() => handleButtonPress(sound)}
+                            className={`relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-b-8 active:border-b-0 active:translate-y-2 h-32 overflow-hidden group
+                                ${isEditMode ? 'border-dashed border-2 bg-gray-800 border-gray-600 hover:border-yellow-500 cursor-alias' : `${sound.color} border-black/20 hover:scale-105`}
+                            `}
+                        >
+                            {isEditMode && <div className="absolute top-2 right-2 bg-black/50 p-1 rounded-full z-10"><Edit2 className="w-3 h-3 text-white" /></div>}
+                            <IconComp className={`w-8 h-8 ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`} />
+                            <span className={`font-black text-lg tracking-wider ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`}>{sound.label}</span>
+                            {!isEditMode && sound.animation && sound.animation !== 'none' && (
+                                <div className="absolute bottom-2 right-2 opacity-50"><Icons.Sparkles className="w-3 h-3" /></div>
+                            )}
+                        </button>
+                    );
+                })}
+
+                {/* ADD NEW BUTTON (Visible in Edit Mode) */}
+                {isEditMode && (
                     <button
-                        key={sound.id}
-                        onClick={() => handleButtonPress(sound)}
-                        className={`relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-b-8 active:border-b-0 active:translate-y-2 h-32 overflow-hidden group
-                            ${isEditMode ? 'border-dashed border-2 bg-gray-800 border-gray-600 hover:border-yellow-500 cursor-alias' : `${sound.color} border-black/20 hover:scale-105`}
-                        `}
+                        onClick={addNewButton}
+                        className="relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-600 bg-gray-800/50 hover:bg-gray-800 hover:border-green-500 group h-32"
                     >
-                        {isEditMode && <div className="absolute top-2 right-2 bg-black/50 p-1 rounded-full z-10"><Edit2 className="w-3 h-3 text-white" /></div>}
-                        <IconComp className={`w-8 h-8 ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`} />
-                        <span className={`font-black text-lg tracking-wider ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`}>{sound.label}</span>
-                        {!isEditMode && sound.animation && sound.animation !== 'none' && (
-                            <div className="absolute bottom-2 right-2 opacity-50"><Icons.Sparkles className="w-3 h-3" /></div>
-                        )}
+                        <div className="p-3 rounded-full bg-gray-800 group-hover:bg-green-900/30 transition-colors">
+                            <Plus className="w-8 h-8 text-gray-500 group-hover:text-green-500" />
+                        </div>
+                        <span className="font-bold text-sm text-gray-500 group-hover:text-green-500 uppercase tracking-widest">Add New</span>
                     </button>
-                );
-            })}
+                )}
+             </div>
          </div>
       </div>
 
@@ -903,6 +987,7 @@ const ControlDeck: React.FC = () => {
             onSave={saveButtonEdit} 
             onCancel={() => setEditingButton(null)} 
             onTest={handleEditorTest}
+            onDelete={deleteButton}
           />
       )}
 

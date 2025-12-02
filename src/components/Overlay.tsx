@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Peer } from 'peerjs';
-import { ArrowLeft, Volume2 } from 'lucide-react';
+import { ArrowLeft, Volume2, Info } from 'lucide-react';
 import { PeerPayload, PollState, ActiveAlert } from '../types';
 import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD } from '../constants';
 import { playSynthSound, unlockAudio } from '../services/audioService';
@@ -12,6 +12,7 @@ const Overlay: React.FC = () => {
   const [activePoll, setActivePoll] = useState<PollState | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   
   const alertTimeoutRef = useRef<number | null>(null);
 
@@ -19,6 +20,10 @@ const Overlay: React.FC = () => {
     // Generate pairing code
     const generatedCode = Math.floor(1000 + Math.random() * 9000).toString();
     setCode(generatedCode);
+
+    // Check Onboarding
+    const seen = localStorage.getItem('onboarding_overlay_seen');
+    if (!seen) setShowOnboarding(true);
 
     const peerId = `${PEER_ID_PREFIX}${generatedCode}`;
     const peer = new Peer(peerId);
@@ -46,6 +51,11 @@ const Overlay: React.FC = () => {
   const handleManualAudioUnlock = async () => {
       const success = await unlockAudio();
       if (success) setAudioEnabled(true);
+  };
+
+  const dismissOnboarding = () => {
+      setShowOnboarding(false);
+      localStorage.setItem('onboarding_overlay_seen', '1');
   };
 
   const handlePayload = (payload: PeerPayload) => {
@@ -114,7 +124,26 @@ const Overlay: React.FC = () => {
     <div className="w-screen h-screen flex flex-col items-center justify-center bg-transparent text-white relative font-sans">
       {!isConnected ? (
         // Not Connected: Show Pairing Code Card
-        <div className="bg-gray-900/90 p-8 rounded-3xl border border-gray-700 shadow-2xl backdrop-blur-md flex flex-col items-center max-w-sm mx-4">
+        <div className="bg-gray-900/90 p-8 rounded-3xl border border-gray-700 shadow-2xl backdrop-blur-md flex flex-col items-center max-w-sm mx-4 relative">
+             
+             {/* Onboarding Bubble */}
+             {showOnboarding && (
+                  <div className="absolute z-50 left-full ml-4 top-0 w-64 animate-bounce-in">
+                      <div className="bg-gray-800 border-2 border-purple-500 rounded-xl p-4 shadow-2xl relative">
+                          <div className="absolute top-8 -left-2 w-4 h-4 bg-gray-800 border-l-2 border-b-2 border-purple-500 rotate-45 transform"></div>
+                          <div className="flex items-start gap-3 mb-2">
+                             <div className="p-1 bg-purple-600 rounded-full"><Info className="w-4 h-4 text-white" /></div>
+                             <h3 className="font-bold text-md leading-tight">This is your overlay</h3>
+                          </div>
+                          <ul className="text-xs text-gray-300 space-y-2 mb-3 list-disc pl-4">
+                              <li>Add this URL as a <b>Browser Source</b> in OBS.</li>
+                              <li>Enter the code you see here on your tablet/phone.</li>
+                          </ul>
+                          <button onClick={dismissOnboarding} className="w-full py-1.5 bg-purple-600 hover:bg-purple-500 rounded-lg font-bold text-xs">Got it</button>
+                      </div>
+                  </div>
+             )}
+
              <div className="w-full flex justify-start mb-4">
                 <button 
                     onClick={() => window.location.hash = ''} 

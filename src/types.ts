@@ -1,5 +1,3 @@
-
-
 export type AppMode = 'CONTROL' | 'OVERLAY' | 'SETTINGS';
 
 export type FontStyle = 'standard' | 'retro' | 'scifi' | 'comic' | 'horror' | 'handwritten';
@@ -84,6 +82,11 @@ export interface TwitchConfig {
   preventSleep?: boolean; // New: Wake Lock preference
 }
 
+export interface DeckConfig {
+  soundButtons: SoundItem[];
+  twitchConfig: TwitchConfig;
+}
+
 // P2P Message Types
 export type PeerPayload = 
   | { 
@@ -103,3 +106,6 @@ export type PeerPayload =
   | { type: 'POLL_UPDATE'; poll: PollState }
   | { type: 'POLL_END'; poll: PollState }
   | { type: 'ALERT'; alertType: 'INACTIVITY' | 'FOLLOW' };
+
+export type SyncPayload =
+  | { type: 'SYNC_CONFIG_PUSH'; config: DeckConfig };

@@ -1,47 +1,80 @@
-
-import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Check, Copy, ExternalLink, ArrowLeft, ShieldCheck, AlertCircle, Zap, Maximize, Minimize } from 'lucide-react';
-import { TwitchConfig } from '../types';
-import { TWITCH_AUTH_BASE, TWITCH_SCOPES } from '../constants';
+import React, { useState, useEffect, useRef } from 'react';
+import { Peer, DataConnection } from 'peerjs';
+import { Settings as SettingsIcon, Check, Copy, ExternalLink, ArrowLeft, ShieldCheck, AlertCircle, Zap, Maximize, Minimize, Share2, Download, Upload, Smartphone, Monitor } from 'lucide-react';
+import { TwitchConfig, SoundItem, DeckConfig, SyncPayload } from '../types';
+import { TWITCH_AUTH_BASE, TWITCH_SCOPES, SYNC_PEER_PREFIX } from '../constants';
+import { exportConfigToJson, validateConfig } from '../services/configService';
 
 interface SettingsProps {
   config: TwitchConfig;
-  onSave: (cfg: TwitchConfig) => void;
+  soundButtons: SoundItem[];
+  setTwitchConfig: (cfg: TwitchConfig) => void;
+  setSoundButtons: (btns: SoundItem[]) => void;
   onBack: () => void;
   isFullscreen: boolean;
   toggleFullscreen: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ config, onSave, onBack, isFullscreen, toggleFullscreen }) => {
+const Settings: React.FC<SettingsProps> = ({ 
+  config, soundButtons, setTwitchConfig, setSoundButtons, 
+  onBack, isFullscreen, toggleFullscreen 
+}) => {
+  // Tab State
+  const [activeTab, setActiveTab] = useState<'general' | 'sync'>('general');
+
+  // --- GENERAL SETTINGS STATE ---
   const [clientId, setClientId] = useState(config.clientId);
   const [manualToken, setManualToken] = useState(config.accessToken);
   const [channel, setChannel] = useState(config.channel);
   const [redirectUri, setRedirectUri] = useState(window.location.origin);
   const [viewerInterval, setViewerInterval] = useState(config.viewerUpdateInterval || 30);
   const [preventSleep, setPreventSleep] = useState(config.preventSleep || false);
-  
-  // Validation State
   const [isValidating, setIsValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<{valid: boolean; msg: string} | null>(null);
 
+  // --- SYNC STATE ---
+  const [syncCode, setSyncCode] = useState(''); // User input for receiver
+  const [generatedCode, setGeneratedCode] = useState(''); // Generated for sender
+  const [syncStatus, setSyncStatus] = useState<'IDLE' | 'WAITING' | 'CONNECTING' | 'SENT' | 'RECEIVED' | 'ERROR'>('IDLE');
+  const [incomingConfig, setIncomingConfig] = useState<DeckConfig | null>(null);
+  
+  // Refs for cleanup
+  const peerRef = useRef<Peer | null>(null);
+  const connRef = useRef<DataConnection | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
-      // If we are on a blob url (preview), origin is null or strange, default to localhost for instructions
-      if (window.location.protocol === 'blob:' || window.location.href.includes('googleusercontent')) {
-         setRedirectUri('http://localhost');
-      }
+    // Determine Redirect URI
+    if (window.location.protocol === 'blob:' || window.location.href.includes('googleusercontent')) {
+       setRedirectUri('http://localhost');
+    }
+    
+    // Cleanup Peer on unmount
+    return () => {
+        cleanupPeer();
+    };
   }, []);
+
+  const cleanupPeer = () => {
+      if (connRef.current) {
+          connRef.current.close();
+          connRef.current = null;
+      }
+      if (peerRef.current) {
+          peerRef.current.destroy();
+          peerRef.current = null;
+      }
+  };
+
+  // --- GENERAL FUNCTIONS ---
 
   const handleTwitchConnect = () => {
     if (!clientId) {
       alert('Please enter a Client ID first');
       return;
     }
-    
-    // Construct Auth URL
     const scopeStr = TWITCH_SCOPES.join('+');
     const url = `${TWITCH_AUTH_BASE}?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scopeStr}`;
-    
-    // Open popup
     window.open(url, 'Twitch Auth', 'width=500,height=700');
   };
 
@@ -49,57 +82,179 @@ const Settings: React.FC<SettingsProps> = ({ config, onSave, onBack, isFullscree
     if (!manualToken) return;
     setIsValidating(true);
     setValidationResult(null);
-    
     try {
-      // Sanitize token just in case
       const token = manualToken.replace(/^oauth:/, '');
       const res = await fetch('https://id.twitch.tv/oauth2/validate', {
         headers: { 'Authorization': `OAuth ${token}` }
       });
-      
       const data = await res.json();
-      
       if (res.ok) {
-        setValidationResult({
-          valid: true,
-          msg: `Valid! User: ${data.login} | Expires: ${Math.floor(data.expires_in / 3600)}h`
-        });
+        setValidationResult({ valid: true, msg: `Valid! User: ${data.login}` });
       } else {
-        setValidationResult({
-          valid: false,
-          msg: `Invalid: ${data.message || 'Unknown error'}`
-        });
+        setValidationResult({ valid: false, msg: `Invalid: ${data.message}` });
       }
     } catch (e) {
-      setValidationResult({ valid: false, msg: 'Network error checking token' });
+      setValidationResult({ valid: false, msg: 'Network error' });
     } finally {
       setIsValidating(false);
     }
   };
 
-  const saveSettings = () => {
-    // Basic sanitization on save
+  const saveGeneralSettings = () => {
     const cleanToken = manualToken.replace(/^oauth:/, '').trim();
-    // Sanitize channel: remove leading #, remove spaces, lowercase
     const cleanChannel = channel.replace(/^#/, '').trim().toLowerCase();
     
-    onSave({
+    setTwitchConfig({
       clientId,
       accessToken: cleanToken,
       channel: cleanChannel,
       viewerUpdateInterval: Number(viewerInterval),
       preventSleep
     });
+    // Note: ControlDeck effects will handle persisting to localStorage/ConfigService
     onBack();
   };
 
+  // --- SYNC & BACKUP FUNCTIONS ---
+
+  // 1. Sender (Host)
+  const startSender = () => {
+      cleanupPeer();
+      const code = Math.floor(1000 + Math.random() * 9000).toString();
+      setGeneratedCode(code);
+      setSyncStatus('WAITING');
+      
+      const peer = new Peer(`${SYNC_PEER_PREFIX}${code}`);
+      peerRef.current = peer;
+      
+      peer.on('connection', (conn) => {
+          connRef.current = conn;
+          conn.on('open', () => {
+              // Build Payload
+              const payload: SyncPayload = {
+                  type: 'SYNC_CONFIG_PUSH',
+                  config: {
+                      soundButtons,
+                      twitchConfig: {
+                          clientId,
+                          accessToken: manualToken,
+                          channel,
+                          viewerUpdateInterval: Number(viewerInterval),
+                          preventSleep
+                      }
+                  }
+              };
+              conn.send(payload);
+              setSyncStatus('SENT');
+              setTimeout(() => {
+                  cleanupPeer();
+                  setSyncStatus('IDLE');
+                  setGeneratedCode('');
+              }, 5000);
+          });
+      });
+
+      peer.on('error', (err) => {
+          console.error(err);
+          setSyncStatus('ERROR');
+      });
+  };
+
+  // 2. Receiver (Client)
+  const connectReceiver = () => {
+      if (syncCode.length !== 4) return;
+      cleanupPeer();
+      setSyncStatus('CONNECTING');
+
+      const peer = new Peer();
+      peerRef.current = peer;
+
+      peer.on('open', () => {
+          const conn = peer.connect(`${SYNC_PEER_PREFIX}${syncCode}`);
+          connRef.current = conn;
+
+          conn.on('open', () => {
+              console.log("Connected to Sender");
+          });
+
+          conn.on('data', (data: any) => {
+              const payload = data as SyncPayload;
+              if (payload.type === 'SYNC_CONFIG_PUSH' && validateConfig(payload.config)) {
+                  setIncomingConfig(payload.config);
+                  setSyncStatus('RECEIVED');
+              }
+          });
+          
+          conn.on('error', () => setSyncStatus('ERROR'));
+      });
+      
+      peer.on('error', () => setSyncStatus('ERROR'));
+  };
+
+  const applyIncomingConfig = () => {
+      if (incomingConfig) {
+          setSoundButtons(incomingConfig.soundButtons);
+          setTwitchConfig(incomingConfig.twitchConfig);
+          // Update local state to reflect new config immediately in UI inputs
+          setClientId(incomingConfig.twitchConfig.clientId);
+          setManualToken(incomingConfig.twitchConfig.accessToken);
+          setChannel(incomingConfig.twitchConfig.channel);
+          setPreventSleep(incomingConfig.twitchConfig.preventSleep || false);
+          
+          setIncomingConfig(null);
+          setSyncStatus('IDLE');
+          setSyncCode('');
+          cleanupPeer();
+          alert('Profile imported successfully!');
+      }
+  };
+
+  // 3. Backup (JSON)
+  const handleExport = () => {
+      const currentConfig: DeckConfig = {
+          soundButtons,
+          twitchConfig: { 
+            clientId, 
+            accessToken: manualToken, 
+            channel, 
+            viewerUpdateInterval: Number(viewerInterval), 
+            preventSleep 
+          }
+      };
+      exportConfigToJson(currentConfig);
+  };
+
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+          try {
+              const json = JSON.parse(ev.target?.result as string);
+              if (validateConfig(json)) {
+                  setIncomingConfig(json as DeckConfig);
+                  setSyncStatus('RECEIVED'); // Re-use the modal logic
+              } else {
+                  alert('Invalid profile file.');
+              }
+          } catch (err) {
+              alert('Failed to parse JSON.');
+          }
+      };
+      reader.readAsText(file);
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+
   return (
     <div className="fixed inset-0 bg-gray-900 text-white z-50 flex flex-col items-center">
-      {/* Scrollable Container with max height for landscape tablets */}
-      <div className="w-full max-w-2xl h-full overflow-y-auto p-6">
+      <div className="w-full max-w-2xl h-full flex flex-col">
         
         {/* Header */}
-        <div className="flex justify-between items-center mb-6 sticky top-0 bg-gray-900/95 backdrop-blur-sm py-4 z-20 border-b border-gray-800">
+        <div className="flex justify-between items-center p-4 bg-gray-900/95 backdrop-blur-sm z-20 border-b border-gray-800 flex-shrink-0">
              <div className="flex items-center gap-3">
                 <div className="p-2 bg-gray-800 rounded-lg">
                   <SettingsIcon className="w-6 h-6 text-purple-500" />
@@ -111,198 +266,202 @@ const Settings: React.FC<SettingsProps> = ({ config, onSave, onBack, isFullscree
             </button>
         </div>
 
-        <div className="space-y-6 mb-20">
-          
-          {/* Section 0: Device Controls (New High Visibility Area) */}
-          <div className="bg-gray-800 rounded-2xl p-2 border border-gray-700 shadow-xl overflow-hidden">
-             <div className="flex flex-col sm:flex-row gap-2">
-                
-                {/* Fullscreen Big Button */}
-                <button 
-                    onClick={toggleFullscreen}
-                    className={`flex-1 flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all group ${
-                        isFullscreen 
-                        ? 'bg-purple-900/20 border-purple-500 text-purple-300' 
-                        : 'bg-gray-900/50 border-gray-700 hover:bg-gray-700 hover:border-gray-500 text-gray-400 hover:text-white'
-                    }`}
-                >
-                    {isFullscreen ? (
-                        <Minimize className="w-10 h-10 mb-3 group-hover:scale-110 transition-transform" />
-                    ) : (
-                        <Maximize className="w-10 h-10 mb-3 group-hover:scale-110 transition-transform" />
-                    )}
-                    <span className="font-bold uppercase tracking-widest text-sm">
-                        {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Mode'}
-                    </span>
-                    <span className="text-[10px] text-gray-500 mt-1">Hide browser UI</span>
-                </button>
-
-                {/* Wake Lock Big Toggle */}
-                <button
-                    onClick={() => setPreventSleep(!preventSleep)}
-                    className={`flex-1 flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all group ${
-                        preventSleep
-                        ? 'bg-yellow-900/20 border-yellow-500 text-yellow-500' 
-                        : 'bg-gray-900/50 border-gray-700 hover:bg-gray-700 hover:border-gray-500 text-gray-400 hover:text-white'
-                    }`}
-                >
-                    <Zap className={`w-10 h-10 mb-3 group-hover:scale-110 transition-transform ${preventSleep ? 'fill-current' : ''}`} />
-                    <span className="font-bold uppercase tracking-widest text-sm">
-                        {preventSleep ? 'Wake Lock: ON' : 'Wake Lock: OFF'}
-                    </span>
-                    <span className="text-[10px] text-gray-500 mt-1">Keep screen awake</span>
-                </button>
-
-             </div>
-          </div>
-          
-          <div className="bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-700 space-y-8">
-            {/* Section 1: Setup Redirect */}
-            <div>
-                <h2 className="text-xl font-semibold mb-2 text-purple-400">1. Register Redirect URI</h2>
-                <p className="text-sm text-gray-400 mb-3">
-                Go to the <a href="https://dev.twitch.tv/console" target="_blank" className="text-blue-400 hover:underline">Twitch Dev Console</a>, create an app, and add this OAuth Redirect URI. 
-                <br/><span className="text-yellow-500 font-bold">Important:</span> The URI below must <b>exactly match</b> what you put in the Twitch Console.
-                </p>
-                <div className="flex gap-2">
-                <input 
-                    type="text" 
-                    value={redirectUri}
-                    onChange={(e) => setRedirectUri(e.target.value)}
-                    className="flex-1 bg-gray-900 border border-gray-700 rounded p-3 focus:border-purple-500 focus:outline-none font-mono text-sm text-green-400"
-                    placeholder="http://localhost"
-                />
-                <button 
-                    onClick={() => navigator.clipboard.writeText(redirectUri)}
-                    className="px-4 bg-gray-800 hover:bg-gray-700 rounded border border-gray-700 transition"
-                    title="Copy to Clipboard"
-                >
-                    <Copy className="w-4 h-4" />
-                </button>
-                </div>
-            </div>
-
-            {/* Section 2: Client ID */}
-            <div>
-                <h2 className="text-xl font-semibold mb-2 text-purple-400">2. Client ID & Channel</h2>
-                <div className="space-y-4">
-                <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Client ID</label>
-                    <input 
-                    type="text" 
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-700 rounded p-3 focus:border-purple-500 focus:outline-none"
-                    placeholder="e.g. gp762nuuoq..."
-                    />
-                </div>
-                <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Target Channel (Username)</label>
-                    <input 
-                    type="text" 
-                    value={channel}
-                    onChange={(e) => setChannel(e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-700 rounded p-3 focus:border-purple-500 focus:outline-none"
-                    placeholder="e.g. ninja"
-                    />
-                </div>
-                </div>
-            </div>
-
-            {/* Section 3: Connect */}
-            <div>
-                <h2 className="text-xl font-semibold mb-2 text-purple-400">3. Connect</h2>
-                <p className="text-sm text-gray-400 mb-4">
-                Scenario A: If running locally, click Connect. <br/>
-                Scenario B: If in Preview, click Connect, let it fail (Connection Refused), then copy the <code>access_token</code> from the failed URL bar into the box below.
-                </p>
-                
-                <div className="flex gap-4 mb-4">
-                <button 
-                    onClick={handleTwitchConnect}
-                    className="flex items-center px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg font-bold transition"
-                >
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    Connect with Twitch
-                </button>
-                </div>
-
-                <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-gray-700"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-gray-800 text-gray-500">OR MANUAL ENTRY</span>
-                </div>
-                </div>
-
-                <div className="mt-4">
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Access Token</label>
-                <div className="flex gap-2">
-                    <input 
-                        type="password" 
-                        value={manualToken}
-                        onChange={(e) => {
-                        setManualToken(e.target.value);
-                        setValidationResult(null); // Clear previous validation
-                        }}
-                        className="flex-1 bg-gray-900 border border-gray-700 rounded p-3 focus:border-purple-500 focus:outline-none font-mono text-sm"
-                        placeholder="oauth:..."
-                    />
-                    <button 
-                        onClick={validateToken}
-                        disabled={!manualToken || isValidating}
-                        className="px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 rounded font-bold transition text-sm flex items-center min-w-[120px] justify-center"
-                    >
-                        {isValidating ? 'Checking...' : (
-                        <>
-                            <ShieldCheck className="w-4 h-4 mr-2" /> Check Token
-                        </>
-                        )}
-                    </button>
-                </div>
-                
-                {/* Validation Result Message */}
-                {validationResult && (
-                    <div className={`mt-2 text-sm p-2 rounded flex items-center ${validationResult.valid ? 'bg-green-900/30 text-green-400 border border-green-800' : 'bg-red-900/30 text-red-400 border border-red-800'}`}>
-                    {validationResult.valid ? <Check className="w-4 h-4 mr-2" /> : <AlertCircle className="w-4 h-4 mr-2" />}
-                    {validationResult.msg}
-                    </div>
-                )}
-                </div>
-            </div>
-
-            {/* Section 4: Preferences */}
-            <div>
-                <h2 className="text-xl font-semibold mb-2 text-purple-400">4. Preferences</h2>
-                <div className="space-y-4">
-                <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Viewer Count Update Interval (Seconds)</label>
-                    <input 
-                    type="number" 
-                    min="5"
-                    max="300"
-                    value={viewerInterval}
-                    onChange={(e) => setViewerInterval(Number(e.target.value))}
-                    className="w-full bg-gray-900 border border-gray-700 rounded p-3 focus:border-purple-500 focus:outline-none"
-                    />
-                </div>
-                </div>
-            </div>
-          </div>
-          
-          <div className="pt-4 border-t border-gray-700 flex justify-end">
+        {/* Tabs */}
+        <div className="flex border-b border-gray-800 bg-gray-900">
             <button 
-              onClick={saveSettings}
-              className="flex items-center px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold transition shadow-lg shadow-green-900/50"
+                onClick={() => setActiveTab('general')}
+                className={`flex-1 py-4 font-bold text-sm uppercase tracking-widest border-b-2 transition ${activeTab === 'general' ? 'border-purple-500 text-purple-400 bg-gray-800' : 'border-transparent text-gray-500 hover:text-white'}`}
             >
-              <Check className="w-5 h-5 mr-2" />
-              Save & Exit
+                General
             </button>
-          </div>
+            <button 
+                onClick={() => setActiveTab('sync')}
+                className={`flex-1 py-4 font-bold text-sm uppercase tracking-widest border-b-2 transition ${activeTab === 'sync' ? 'border-purple-500 text-purple-400 bg-gray-800' : 'border-transparent text-gray-500 hover:text-white'}`}
+            >
+                Profile & Sync
+            </button>
+        </div>
 
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+          {/* === GENERAL TAB === */}
+          {activeTab === 'general' && (
+              <>
+                 {/* Device Controls */}
+                 <div className="bg-gray-800 rounded-2xl p-2 border border-gray-700 shadow-xl overflow-hidden">
+                    <div className="flex flex-col sm:flex-row gap-2">
+                        <button 
+                            onClick={toggleFullscreen}
+                            className={`flex-1 flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all group ${isFullscreen ? 'bg-purple-900/20 border-purple-500 text-purple-300' : 'bg-gray-900/50 border-gray-700 hover:bg-gray-700 hover:border-gray-500 text-gray-400 hover:text-white'}`}
+                        >
+                            {isFullscreen ? <Minimize className="w-8 h-8 mb-2" /> : <Maximize className="w-8 h-8 mb-2" />}
+                            <span className="font-bold uppercase tracking-widest text-xs">{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
+                        </button>
+                        <button
+                            onClick={() => setPreventSleep(!preventSleep)}
+                            className={`flex-1 flex flex-col items-center justify-center p-6 rounded-xl border-2 transition-all group ${preventSleep ? 'bg-yellow-900/20 border-yellow-500 text-yellow-500' : 'bg-gray-900/50 border-gray-700 hover:bg-gray-700 hover:border-gray-500 text-gray-400 hover:text-white'}`}
+                        >
+                            <Zap className={`w-8 h-8 mb-2 ${preventSleep ? 'fill-current' : ''}`} />
+                            <span className="font-bold uppercase tracking-widest text-xs">Wake Lock: {preventSleep ? 'ON' : 'OFF'}</span>
+                        </button>
+                    </div>
+                 </div>
+
+                 {/* Twitch Auth Form */}
+                 <div className="bg-gray-800 rounded-2xl p-6 shadow-lg border border-gray-700 space-y-6">
+                    <div>
+                        <h2 className="text-lg font-semibold mb-1 text-purple-400">Twitch Connection</h2>
+                        <p className="text-xs text-gray-400 mb-4">Set up your credentials to enable chat and alerts.</p>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Redirect URI</label>
+                                <div className="flex gap-2">
+                                    <input readOnly value={redirectUri} className="flex-1 bg-gray-900 border border-gray-700 rounded p-3 text-xs text-green-400 font-mono" />
+                                    <button onClick={() => navigator.clipboard.writeText(redirectUri)} className="px-3 bg-gray-700 rounded hover:bg-gray-600"><Copy className="w-4 h-4"/></button>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Client ID</label>
+                                <input value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded p-3 focus:border-purple-500 outline-none" placeholder="Required" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Channel Name</label>
+                                <input value={channel} onChange={(e) => setChannel(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded p-3 focus:border-purple-500 outline-none" placeholder="Required" />
+                            </div>
+                            
+                            <div className="pt-2">
+                                <button onClick={handleTwitchConnect} className="w-full py-3 bg-purple-600 hover:bg-purple-700 rounded font-bold flex justify-center items-center"><ExternalLink className="w-4 h-4 mr-2"/> Connect via Twitch</button>
+                                <div className="text-center text-xs text-gray-500 my-2">- OR -</div>
+                                <div className="flex gap-2">
+                                    <input type="password" value={manualToken} onChange={(e) => setManualToken(e.target.value)} className="flex-1 bg-gray-900 border border-gray-700 rounded p-3 text-xs font-mono" placeholder="Paste Access Token (oauth:...)" />
+                                    <button onClick={validateToken} disabled={!manualToken || isValidating} className="px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 rounded font-bold text-xs">Check</button>
+                                </div>
+                                {validationResult && (
+                                    <div className={`mt-2 text-xs p-2 rounded flex items-center ${validationResult.valid ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+                                        {validationResult.valid ? <Check className="w-3 h-3 mr-2" /> : <AlertCircle className="w-3 h-3 mr-2" />}
+                                        {validationResult.msg}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                 </div>
+
+                 <div className="flex justify-end pt-4">
+                    <button onClick={saveGeneralSettings} className="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold shadow-lg flex items-center"><Check className="w-5 h-5 mr-2"/> Save Changes</button>
+                 </div>
+              </>
+          )}
+
+          {/* === PROFILE & SYNC TAB === */}
+          {activeTab === 'sync' && (
+              <div className="space-y-6">
+                  {/* Sender Card */}
+                  <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden">
+                      <div className="p-4 bg-purple-900/20 border-b border-gray-700 flex items-center gap-3">
+                          <div className="p-2 bg-purple-600 rounded-lg"><Monitor className="w-5 h-5 text-white"/></div>
+                          <div>
+                              <h3 className="font-bold text-lg">Send profile to another device</h3>
+                              <p className="text-xs text-gray-400">Copy this deck to your tablet or phone.</p>
+                          </div>
+                      </div>
+                      <div className="p-6 flex flex-col items-center text-center">
+                          {syncStatus === 'IDLE' || syncStatus === 'RECEIVED' || syncStatus === 'ERROR' ? (
+                              <button onClick={startSender} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold border border-gray-600 w-full md:w-auto">
+                                  Start as Sender
+                              </button>
+                          ) : (
+                              <div className="animate-in fade-in zoom-in w-full flex flex-col items-center">
+                                  {syncStatus === 'SENT' ? (
+                                      <div className="text-green-400 font-bold text-xl mb-4 flex items-center gap-2"><Check className="w-6 h-6"/> Profile Sent!</div>
+                                  ) : (
+                                      <>
+                                          <div className="text-xs font-bold uppercase text-gray-500 mb-2">Sync Code</div>
+                                          <div className="text-5xl font-mono font-bold text-purple-400 tracking-widest mb-4">{generatedCode}</div>
+                                          <div className="flex items-center gap-2 text-sm text-yellow-500 animate-pulse"><Share2 className="w-4 h-4"/> Waiting for receiver...</div>
+                                      </>
+                                  )}
+                                  <button onClick={() => { cleanupPeer(); setSyncStatus('IDLE'); setGeneratedCode(''); }} className="mt-6 text-xs text-gray-500 underline">Cancel</button>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+
+                  {/* Receiver Card */}
+                  <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden">
+                      <div className="p-4 bg-blue-900/20 border-b border-gray-700 flex items-center gap-3">
+                          <div className="p-2 bg-blue-600 rounded-lg"><Smartphone className="w-5 h-5 text-white"/></div>
+                          <div>
+                              <h3 className="font-bold text-lg">Receive profile from device</h3>
+                              <p className="text-xs text-gray-400">Enter the code displayed on the sender.</p>
+                          </div>
+                      </div>
+                      <div className="p-6">
+                           <div className="flex gap-2 max-w-sm mx-auto">
+                               <input 
+                                   type="text" 
+                                   value={syncCode} 
+                                   onChange={(e) => setSyncCode(e.target.value.slice(0, 4))} 
+                                   placeholder="0000"
+                                   className="flex-1 bg-gray-900 border border-gray-700 rounded-xl text-center text-2xl font-mono tracking-widest p-3 focus:border-blue-500 outline-none"
+                               />
+                               <button 
+                                   onClick={connectReceiver}
+                                   disabled={syncCode.length !== 4 || syncStatus === 'CONNECTING'}
+                                   className="px-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 rounded-xl font-bold transition"
+                               >
+                                   {syncStatus === 'CONNECTING' ? '...' : 'Connect'}
+                               </button>
+                           </div>
+                           {syncStatus === 'ERROR' && <p className="text-red-400 text-xs text-center mt-3">Connection failed. Check code.</p>}
+                      </div>
+                  </div>
+
+                  {/* Backup Card */}
+                  <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden">
+                      <div className="p-4 bg-gray-750 border-b border-gray-700">
+                          <h3 className="font-bold text-sm uppercase text-gray-500">Backup & Restore</h3>
+                      </div>
+                      <div className="p-6 grid grid-cols-2 gap-4">
+                          <button onClick={handleExport} className="flex flex-col items-center justify-center p-4 bg-gray-900 border border-gray-700 hover:border-green-500 rounded-xl transition gap-2">
+                              <Download className="w-6 h-6 text-green-500"/>
+                              <span className="font-bold text-sm">Download Backup</span>
+                          </button>
+                          <button onClick={handleImportClick} className="flex flex-col items-center justify-center p-4 bg-gray-900 border border-gray-700 hover:border-blue-500 rounded-xl transition gap-2">
+                              <Upload className="w-6 h-6 text-blue-500"/>
+                              <span className="font-bold text-sm">Import Backup</span>
+                          </button>
+                          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".json" className="hidden" />
+                      </div>
+                  </div>
+              </div>
+          )}
         </div>
       </div>
+
+      {/* Confirmation Modal for Import (Sync or File) */}
+      {incomingConfig && (
+          <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+              <div className="bg-gray-800 rounded-2xl border-2 border-yellow-500 p-6 max-w-sm w-full shadow-2xl animate-bounce-in">
+                  <div className="flex justify-center mb-4"><AlertCircle className="w-12 h-12 text-yellow-500"/></div>
+                  <h3 className="text-xl font-bold text-center mb-2">Replace Profile?</h3>
+                  <p className="text-gray-400 text-center text-sm mb-6">
+                      This will overwrite your current buttons and Twitch settings with the incoming profile.
+                  </p>
+                  <div className="bg-gray-900 p-3 rounded mb-6 text-xs text-gray-300">
+                      <div className="flex justify-between mb-1"><span>Channel:</span> <span className="text-white">{incomingConfig.twitchConfig.channel || 'None'}</span></div>
+                      <div className="flex justify-between"><span>Buttons:</span> <span className="text-white">{incomingConfig.soundButtons.length}</span></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                      <button onClick={() => { setIncomingConfig(null); setSyncStatus('IDLE'); }} className="py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold">Cancel</button>
+                      <button onClick={applyIncomingConfig} className="py-3 bg-yellow-600 hover:bg-yellow-500 rounded-lg font-bold text-black">Yes, Replace</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
     </div>
   );
 };
