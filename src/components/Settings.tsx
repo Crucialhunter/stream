@@ -48,10 +48,21 @@ const Settings: React.FC<SettingsProps> = ({
     if (window.location.protocol === 'blob:' || window.location.href.includes('googleusercontent')) {
        setRedirectUri('http://localhost');
     }
+
+    // Listen for Twitch Auth Popup Message
+    const handleMessage = (event: MessageEvent) => {
+        if (event.origin !== window.location.origin) return;
+        if (event.data?.type === 'TWITCH_AUTH_SUCCESS' && event.data.token) {
+            setManualToken(event.data.token);
+            setValidationResult({ valid: true, msg: 'Token received! Click Save.' });
+        }
+    };
+    window.addEventListener('message', handleMessage);
     
     // Cleanup Peer on unmount
     return () => {
         cleanupPeer();
+        window.removeEventListener('message', handleMessage);
     };
   }, []);
 
