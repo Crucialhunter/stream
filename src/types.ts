@@ -114,8 +114,10 @@ export type PeerPayload =
   | { type: 'SHOW_CHAT_MSG'; msg: ChatMessage }
   | { type: 'POLL_UPDATE'; poll: PollState }
   | { type: 'POLL_END'; poll: PollState }
-  | { type: 'POLL_REACTION'; optionId: string; reaction: 'up' | 'down' } // New reaction type
-  | { type: 'ALERT'; alertType: 'INACTIVITY' | 'FOLLOW' };
+  | { type: 'POLL_REACTION'; optionId: string; reaction: 'up' | 'down' }
+  | { type: 'ALERT'; alertType: 'INACTIVITY' | 'FOLLOW' }
+  | { type: 'PING'; timestamp: number } // Heartbeat Ping
+  | { type: 'PONG'; timestamp: number; serverTime: number }; // Heartbeat Pong
 
 export type SyncPayload =
   | { type: 'SYNC_CONFIG_PUSH'; config: DeckConfig };

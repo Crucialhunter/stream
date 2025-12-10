@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Peer, DataConnection } from 'peerjs';
-import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize, FlaskConical, PlayCircle, UserPlus, Users, MessageSquarePlus, Zap, Info, PartyPopper, ArrowUp, ArrowDown, Eye, CheckCircle } from 'lucide-react';
+import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize, FlaskConical, PlayCircle, UserPlus, Users, MessageSquarePlus, Zap, Info, PartyPopper, ArrowUp, ArrowDown, Eye, CheckCircle, Activity, ZapOff } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD, SOUND_LIBRARY, FONT_STYLES, ANIMATION_STYLES, DEFAULT_EVENT_TEMPLATES } from '../constants';
 import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState, ActiveAlert } from '../types';
@@ -358,6 +358,11 @@ const ControlDeck: React.FC = () => {
   const [inputCode, setInputCode] = useState('');
   const [status, setStatus] = useState<'DISCONNECTED' | 'CONNECTING' | 'CONNECTED'>('DISCONNECTED');
   const [autoReconnect, setAutoReconnect] = useState(false);
+  
+  // Network Health / Heartbeat
+  const [latency, setLatency] = useState<number | null>(null);
+  const lastPongRef = useRef<number>(Date.now());
+  const heartbeatIntervalRef = useRef<number | null>(null);
 
   // UI State
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -555,25 +560,72 @@ const ControlDeck: React.FC = () => {
     const destId = `${PEER_ID_PREFIX}${inputCode}`;
     const connection = peer.connect(destId);
 
+    // Reset Ping tracker
+    lastPongRef.current = Date.now();
+    setLatency(null);
+
     connection.on('open', () => { 
         setStatus('CONNECTED'); 
         setConn(connection);
         setAutoReconnect(true);
         addLog('info', 'Connected to Overlay');
+        lastPongRef.current = Date.now(); // Reset ping timeout clock
+    });
+
+    connection.on('data', (data: any) => {
+        // Handle Pong
+        if (data && data.type === 'PONG') {
+            const now = Date.now();
+            const latencyMs = now - data.timestamp;
+            setLatency(latencyMs);
+            lastPongRef.current = now;
+        }
     });
 
     connection.on('close', () => { 
         setStatus('DISCONNECTED'); 
         setConn(null); 
+        setLatency(null);
         addLog('info', 'Connection closed');
     });
 
     connection.on('error', (err) => { 
         setStatus('DISCONNECTED'); 
         setConn(null); 
+        setLatency(null);
         addLog('error', 'Connection error');
     });
   }, [peer, inputCode, conn, addLog]);
+
+  // Heartbeat Loop
+  useEffect(() => {
+      if (status === 'CONNECTED' && conn && conn.open) {
+          heartbeatIntervalRef.current = window.setInterval(() => {
+              const now = Date.now();
+              // Check for zombie connection (no pong for 10s)
+              if (now - lastPongRef.current > 10000) {
+                  addLog('error', 'Connection Dead (No Pong). Reconnecting...');
+                  connectToOverlay();
+                  return;
+              }
+
+              // Send Ping
+              try {
+                  conn.send({ type: 'PING', timestamp: now });
+              } catch(e) {
+                  console.warn("Ping failed", e);
+              }
+          }, 2000);
+      } else {
+          if (heartbeatIntervalRef.current) {
+              clearInterval(heartbeatIntervalRef.current);
+              heartbeatIntervalRef.current = null;
+          }
+      }
+      return () => {
+          if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+      };
+  }, [status, conn, connectToOverlay, addLog]);
 
   // Aggressive Reconnect on Visibility Change (Tab Wake Up)
   useEffect(() => {
@@ -1057,9 +1109,24 @@ const ControlDeck: React.FC = () => {
                 </div>
             ) : (
                 status === 'CONNECTED' ? (
-                    <div className="flex items-center gap-2 text-green-400 font-bold text-xs"><Wifi className="w-3 h-3" /> Connected</div>
+                    <div className="flex items-center gap-2">
+                        {/* Latency Indicator */}
+                        <div className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded border ${latency && latency < 200 ? 'text-green-400 border-green-500/30 bg-green-900/20' : 'text-yellow-400 border-yellow-500/30 bg-yellow-900/20'}`}>
+                            <Activity className="w-3 h-3" /> {latency ? `${latency}ms` : '--'}
+                        </div>
+                        {/* Force Reconnect Button */}
+                        <button 
+                            onClick={connectToOverlay} 
+                            className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 hover:text-white"
+                            title="Force Reconnect"
+                        >
+                            <Zap className="w-3 h-3" />
+                        </button>
+                    </div>
                 ) : (
-                    <div className="flex items-center gap-2 text-yellow-400 font-bold text-xs animate-pulse"><RefreshCw className="w-3 h-3 animate-spin" /> Reconnecting...</div>
+                    <div className="flex items-center gap-2 text-red-400 font-bold text-xs animate-pulse">
+                        <ZapOff className="w-3 h-3" /> Disconnected
+                    </div>
                 )
             )}
             
@@ -1209,8 +1276,40 @@ const ControlDeck: React.FC = () => {
 
       {/* Debug Console */}
       {showDebug && (
-        <div className="absolute bottom-0 right-0 w-full md:w-2/3 h-48 bg-black/90 text-green-400 font-mono text-xs border-t-2 border-purple-500 flex flex-col z-50">
-            <div className="flex justify-between items-center p-2 bg-gray-900"><span className="font-bold flex items-center"><Terminal className="w-3 h-3 mr-2" /> Debug</span><button onClick={() => setShowDebug(false)}><X className="w-4 h-4" /></button></div>
+        <div className="absolute bottom-0 right-0 w-full md:w-2/3 h-56 bg-black/95 text-green-400 font-mono text-xs border-t-2 border-purple-500 flex flex-col z-50">
+            <div className="flex justify-between items-center p-2 bg-gray-900 border-b border-gray-700">
+                <span className="font-bold flex items-center"><Terminal className="w-3 h-3 mr-2" /> Network Diagnostics</span>
+                <button onClick={() => setShowDebug(false)}><X className="w-4 h-4" /></button>
+            </div>
+            
+            {/* Connection Stats Panel */}
+            <div className="grid grid-cols-2 gap-2 p-2 bg-gray-900/50 border-b border-gray-800 text-[10px]">
+                <div className="flex justify-between">
+                    <span className="text-gray-500">Peer ID:</span>
+                    <span className="text-white">{inputCode ? `...${inputCode}` : 'N/A'}</span>
+                </div>
+                 <div className="flex justify-between">
+                    <span className="text-gray-500">Status:</span>
+                    <span className={`${status === 'CONNECTED' ? 'text-green-400' : 'text-red-400'} font-bold`}>{status}</span>
+                </div>
+                <div className="flex justify-between">
+                    <span className="text-gray-500">Latency:</span>
+                    <span className="text-white">{latency ? `${latency}ms` : 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                    <span className="text-gray-500">Last Pong:</span>
+                    <span className={Date.now() - lastPongRef.current > 5000 ? 'text-red-400' : 'text-green-400'}>
+                        {Math.floor((Date.now() - lastPongRef.current) / 1000)}s ago
+                    </span>
+                </div>
+            </div>
+            
+            <div className="p-2 border-b border-gray-800">
+                <button onClick={connectToOverlay} className="w-full bg-red-900/40 hover:bg-red-900/60 text-red-300 border border-red-800 p-1 rounded font-bold text-xs uppercase flex items-center justify-center gap-2">
+                    <Zap className="w-3 h-3"/> Force Full Reconnect
+                </button>
+            </div>
+
             <div className="flex-1 overflow-y-auto p-2"><div ref={logsEndRef} />{logs.map((l, i) => <div key={i}>{l}</div>)}</div>
         </div>
       )}

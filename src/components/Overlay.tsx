@@ -38,10 +38,11 @@ const Overlay: React.FC = () => {
 
       conn.on('data', (data) => {
         const payload = data as PeerPayload;
-        handlePayload(payload);
+        handlePayload(payload, conn);
       });
 
       conn.on('close', () => setIsConnected(false));
+      conn.on('error', () => setIsConnected(false));
     });
     
     // Try to unlock audio automatically
@@ -62,7 +63,17 @@ const Overlay: React.FC = () => {
       localStorage.setItem('onboarding_overlay_seen', '1');
   };
 
-  const handlePayload = (payload: PeerPayload) => {
+  const handlePayload = (payload: PeerPayload, conn: any) => {
+    // Heartbeat Response
+    if (payload.type === 'PING') {
+        conn.send({ 
+            type: 'PONG', 
+            timestamp: payload.timestamp, 
+            serverTime: Date.now() 
+        });
+        return;
+    }
+
     // SFX Trigger
     if (payload.type === 'TRIGGER_SFX') {
         const defaultSound = DEFAULT_SOUND_BOARD.find(s => s.id === payload.sfxId);
