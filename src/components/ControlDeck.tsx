@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Peer, DataConnection } from 'peerjs';
-import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize, FlaskConical, PlayCircle, UserPlus, Users, MessageSquarePlus, Zap, Info, PartyPopper, ArrowUp, ArrowDown, Eye, CheckCircle, Activity, ZapOff } from 'lucide-react';
+import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize, FlaskConical, PlayCircle, UserPlus, Users, MessageSquarePlus, Zap, Info, PartyPopper, ArrowUp, ArrowDown, Eye, CheckCircle, Activity, ZapOff, Gamepad2 } from 'lucide-react';
 import * as Icons from 'lucide-react';
-import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD, SOUND_LIBRARY, FONT_STYLES, ANIMATION_STYLES, DEFAULT_EVENT_TEMPLATES } from '../constants';
-import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState, ActiveAlert } from '../types';
+import { PEER_ID_PREFIX, WALKERS_PEER_PREFIX, DEFAULT_SOUND_BOARD, SOUND_LIBRARY, FONT_STYLES, ANIMATION_STYLES, DEFAULT_EVENT_TEMPLATES } from '../constants';
+import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState, ActiveAlert, StreamWalkersCommand, Walker, WalkersResponsePayload, WalkerLogEntry } from '../types';
 import { TwitchIRC } from '../services/twitchIRC';
 import { playSynthSound } from '../services/audioService';
 import { generateMockChat, generateMockEvent, generateMockPoll } from '../services/mockService';
@@ -13,6 +13,7 @@ import ChatMonitor from './ChatMonitor';
 import ViewerCounter from './ViewerCounter';
 import Settings from './Settings';
 import OverlayDisplay from './OverlayDisplay';
+import StreamWalkersPanel from './StreamWalkersPanel';
 
 // --- EVENTS PANEL ---
 const EventsPanel: React.FC<{ 
@@ -330,6 +331,7 @@ const ButtonEditor: React.FC<{
 const ControlDeck: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [viewMode, setViewMode] = useState<'soundboard' | 'walkers'>('soundboard');
   
   // App Data State
   const [twitchConfig, setTwitchConfig] = useState<TwitchConfig>({ clientId: '', accessToken: '', channel: '', preventSleep: false });
@@ -352,17 +354,42 @@ const ControlDeck: React.FC = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingButton, setEditingButton] = useState<SoundItem | null>(null);
 
-  // Connection State
+  // --- OVERLAY CONNECTION STATE ---
   const [peer, setPeer] = useState<Peer | null>(null);
   const [conn, setConn] = useState<DataConnection | null>(null);
   const [inputCode, setInputCode] = useState('');
   const [status, setStatus] = useState<'DISCONNECTED' | 'CONNECTING' | 'CONNECTED'>('DISCONNECTED');
   const [autoReconnect, setAutoReconnect] = useState(false);
-  
-  // Network Health / Heartbeat
   const [latency, setLatency] = useState<number | null>(null);
   const lastPongRef = useRef<number>(Date.now());
   const heartbeatIntervalRef = useRef<number | null>(null);
+
+  // --- STREAM WALKERS CONNECTION STATE ---
+  const [walkersConn, setWalkersConn] = useState<DataConnection | null>(null);
+  const [walkersCode, setWalkersCode] = useState('');
+  const [walkersStatus, setWalkersStatus] = useState<'DISCONNECTED' | 'CONNECTING' | 'CONNECTED'>('DISCONNECTED');
+  const [walkersAutoReconnect, setWalkersAutoReconnect] = useState(false);
+  const [walkersLatency, setWalkersLatency] = useState<number | null>(null);
+  const [walkersList, setWalkersList] = useState<Walker[]>([]);
+  const [walkersServerState, setWalkersServerState] = useState<any>(null);
+  const walkersLastPongRef = useRef<number>(Date.now());
+  const walkersHeartbeatIntervalRef = useRef<number | null>(null);
+  
+  // --- STREAM WALKERS LOGS ---
+  const [walkersLogs, setWalkersLogs] = useState<WalkerLogEntry[]>([]);
+
+  const addWalkerLog = useCallback((direction: 'IN' | 'OUT' | 'SYS', type: string, message: string, details?: any) => {
+      const entry: WalkerLogEntry = {
+          id: Math.random().toString(36).substr(2, 9),
+          timestamp: new Date().toLocaleTimeString(),
+          direction,
+          type,
+          message,
+          details
+      };
+      // Keep last 200 logs
+      setWalkersLogs(prev => [...prev.slice(-199), entry]);
+  }, []);
 
   // UI State
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -547,7 +574,7 @@ const ControlDeck: React.FC = () => {
       }
   };
 
-  // --- CONNECTION & RECONNECTION ---
+  // --- OVERLAY CONNECTION & RECONNECTION ---
   const connectToOverlay = useCallback(() => {
     if (!peer || inputCode.length !== 4) return;
     
@@ -597,7 +624,7 @@ const ControlDeck: React.FC = () => {
     });
   }, [peer, inputCode, conn, addLog]);
 
-  // Heartbeat Loop
+  // Heartbeat Loop (Overlay)
   useEffect(() => {
       if (status === 'CONNECTED' && conn && conn.open) {
           heartbeatIntervalRef.current = window.setInterval(() => {
@@ -627,32 +654,151 @@ const ControlDeck: React.FC = () => {
       };
   }, [status, conn, connectToOverlay, addLog]);
 
-  // Aggressive Reconnect on Visibility Change (Tab Wake Up)
+
+  // --- STREAM WALKERS CONNECTION & RECONNECTION ---
+  const connectToWalkers = useCallback(() => {
+      if (!peer || walkersCode.length !== 4) return;
+      
+      if (walkersConn) {
+          try { walkersConn.close(); } catch(e){}
+      }
+
+      setWalkersStatus('CONNECTING');
+      addWalkerLog('SYS', 'CONNECT', `Connecting to Walkers ID: ...${walkersCode}`);
+      
+      // Target ID format: streamwalkers-host-v1-<code>
+      const destId = `${WALKERS_PEER_PREFIX}${walkersCode}`;
+      const connection = peer.connect(destId);
+
+      walkersLastPongRef.current = Date.now();
+      setWalkersLatency(null);
+
+      connection.on('open', () => {
+          setWalkersStatus('CONNECTED');
+          setWalkersConn(connection);
+          setWalkersAutoReconnect(true);
+          addLog('info', '[Walkers] Connected');
+          addWalkerLog('SYS', 'CONNECTED', `Connection established`, { destId });
+          walkersLastPongRef.current = Date.now();
+          
+          // Initial Fetch
+          const cmdList: StreamWalkersCommand = { type: 'LIST_WALKERS' };
+          connection.send(cmdList);
+          addWalkerLog('OUT', 'COMMAND', 'LIST_WALKERS');
+
+          const cmdState: StreamWalkersCommand = { type: 'GET_STATE' };
+          connection.send(cmdState);
+          addWalkerLog('OUT', 'COMMAND', 'GET_STATE');
+      });
+
+      connection.on('data', (payload: any) => {
+          // Note: payload structure from spec is { success, data } usually, except PING might differ or be handled via PONG response
+          const response = payload as WalkersResponsePayload;
+          
+          if (response.success && response.data) {
+              const d = response.data;
+              
+              if (d.type === 'PONG') {
+                  const now = Date.now();
+                  // Spec: clientTime sent in PING. 
+                  const rtt = now - (walkersLastPingTimeRef.current || (now - 100));
+                  setWalkersLatency(rtt);
+                  walkersLastPongRef.current = now;
+                  
+                  if (d.state) setWalkersServerState(d.state);
+                  
+                  addWalkerLog('IN', 'PONG', `Latency: ${rtt}ms`, d);
+              } else if (d.walkers) {
+                  setWalkersList(d.walkers);
+                  addWalkerLog('IN', 'RESPONSE', `Updated Walkers List (${d.walkers.length} items)`, d.walkers);
+              } else if (d.mood) {
+                   // GET_STATE response format
+                   setWalkersServerState(d);
+                   addWalkerLog('IN', 'RESPONSE', `State Update: Mood=${d.mood}`, d);
+              } else {
+                  addWalkerLog('IN', 'RESPONSE', 'Data Received', d);
+              }
+          } else if (response.error) {
+              addLog('error', `[Walkers] Error: ${response.error}`);
+              addWalkerLog('IN', 'ERROR', response.error, payload);
+          } else {
+              // Fallback log for unknown formats
+              addWalkerLog('IN', 'UNKNOWN', 'Received unknown payload', payload);
+          }
+      });
+
+      connection.on('close', () => {
+          setWalkersStatus('DISCONNECTED');
+          setWalkersConn(null);
+          setWalkersLatency(null);
+          addLog('info', '[Walkers] Closed');
+          addWalkerLog('SYS', 'DISCONNECTED', 'Connection closed');
+      });
+      
+      connection.on('error', (err) => {
+          setWalkersStatus('DISCONNECTED');
+          setWalkersConn(null);
+          addLog('error', `[Walkers] Error: ${err.message}`);
+          addWalkerLog('SYS', 'ERROR', err.message);
+      });
+
+  }, [peer, walkersCode, walkersConn, addLog, addWalkerLog]);
+
+  const walkersLastPingTimeRef = useRef<number>(0);
+
+  // Heartbeat Loop (Walkers)
+  useEffect(() => {
+      if (walkersStatus === 'CONNECTED' && walkersConn && walkersConn.open) {
+          walkersHeartbeatIntervalRef.current = window.setInterval(() => {
+              const now = Date.now();
+              if (now - walkersLastPongRef.current > 10000) {
+                  addLog('error', '[Walkers] Zombie connection. Reconnecting...');
+                  addWalkerLog('SYS', 'ERROR', 'Zombie connection (No Pong). Reconnecting...');
+                  connectToWalkers();
+                  return;
+              }
+              
+              try {
+                  walkersLastPingTimeRef.current = now;
+                  walkersConn.send({ type: 'PING', clientTime: now });
+                  // Only log PINGs if we want very verbose logs. Maybe toggle? 
+                  // For now, let's log it as it helps debug heartbeat.
+                  addWalkerLog('OUT', 'PING', 'Heartbeat sent');
+              } catch(e) { console.warn("Walkers Ping failed", e); }
+          }, 2000);
+      } else {
+          if (walkersHeartbeatIntervalRef.current) {
+              clearInterval(walkersHeartbeatIntervalRef.current);
+              walkersHeartbeatIntervalRef.current = null;
+          }
+      }
+      return () => { if (walkersHeartbeatIntervalRef.current) clearInterval(walkersHeartbeatIntervalRef.current); };
+  }, [walkersStatus, walkersConn, connectToWalkers, addLog, addWalkerLog]);
+
+  // Aggressive Reconnect on Visibility Change
   useEffect(() => {
       const handleVisibilityForReconnect = () => {
-          if (document.visibilityState === 'visible' && autoReconnect) {
-              // If we thought we were connected, or if disconnected, check health
-              console.log("Tab Awake. Checking Connection...");
-              if (!conn || !conn.open || status === 'DISCONNECTED') {
-                  console.log("Connection stale. Reconnecting...");
+          if (document.visibilityState === 'visible') {
+              if (autoReconnect && (!conn || !conn.open || status === 'DISCONNECTED')) {
+                  console.log("Tab Awake. Reconnecting Overlay...");
                   connectToOverlay();
+              }
+              if (walkersAutoReconnect && (!walkersConn || !walkersConn.open || walkersStatus === 'DISCONNECTED')) {
+                  console.log("Tab Awake. Reconnecting Walkers...");
+                  connectToWalkers();
               }
           }
       };
       document.addEventListener('visibilitychange', handleVisibilityForReconnect);
       return () => document.removeEventListener('visibilitychange', handleVisibilityForReconnect);
-  }, [autoReconnect, conn, status, connectToOverlay]);
+  }, [autoReconnect, conn, status, connectToOverlay, walkersAutoReconnect, walkersConn, walkersStatus, connectToWalkers]);
 
 
   // --- POLL SYNC FIX ---
   // Sync Poll State to Peer whenever it changes.
-  // This avoids stale closures inside the TwitchIRC callback.
   useEffect(() => {
       if (conn && conn.open && poll) {
           conn.send({ type: 'POLL_UPDATE', poll });
-      } else if (conn && conn.open && !poll) {
-          // If poll was cleared locally, we might want to clear remotely? 
-          // (Usually handled by onEndPoll sending POLL_END)
       }
   }, [poll, conn]);
 
@@ -661,12 +807,6 @@ const ControlDeck: React.FC = () => {
       setChatMessages(prev => {
           const targetIndex = prev.findIndex(m => m.id === msgId);
           if (targetIndex === -1) return prev;
-          
-          // Since new messages are appended to end, we usually read top-down (oldest first).
-          // But in a chat monitor, usually bottom is newest.
-          // The user requirement: "Si le doy al botón de visto, todos los anteriores se marcan como visto."
-          // In our array, index 0 is oldest, index N is newest.
-          // If we click index i, we want 0...i to be read.
           return prev.map((msg, idx) => {
               if (idx <= targetIndex) return { ...msg, read: true };
               return msg;
@@ -703,7 +843,6 @@ const ControlDeck: React.FC = () => {
                         if (data.client_id !== twitchConfig.clientId) {
                              const newConfig = { ...twitchConfig, clientId: data.client_id };
                              setTwitchConfig(newConfig);
-                             // LocalStorage save handled by effect
                         }
                     }
                 }
@@ -744,7 +883,6 @@ const ControlDeck: React.FC = () => {
                 fetchedUsername, 
                 (msg) => {
                     if (!isMounted) return;
-                    // Add new message, default read=false
                     const newMsg = { ...msg, read: false };
                     setChatMessages(prev => [...prev.slice(-99), newMsg]);
                     setLastMsgTime(Date.now());
@@ -762,7 +900,6 @@ const ControlDeck: React.FC = () => {
                                      options: updatedOpts, 
                                      totalVotes: currentPoll.totalVotes + 1 
                                  };
-                                 // NOTE: Sending to Peer is now handled by the useEffect[poll, conn] hook above
                                  return updatedPoll;
                              }
                         }
@@ -789,13 +926,13 @@ const ControlDeck: React.FC = () => {
     };
   }, [twitchConfig.accessToken, twitchConfig.channel]);
 
+  // --- COMMAND HANDLERS ---
   const sendTriggerPayload = (btn: SoundItem) => {
       // Check connection before sending, reconnect if needed
       if (status !== 'CONNECTED' || !conn || !conn.open) {
           if (autoReconnect) {
               addLog('info', 'Reconnecting before send...');
               connectToOverlay();
-              // Cannot send immediately, user must tap again
               return;
           }
       }
@@ -816,8 +953,37 @@ const ControlDeck: React.FC = () => {
       }
   };
 
+  const sendWalkersCommand = (cmd: StreamWalkersCommand) => {
+      if (walkersStatus === 'CONNECTED' && walkersConn && walkersConn.open) {
+          walkersConn.send(cmd);
+          
+          // Log the command
+          let summary = '';
+          if ('target' in cmd && cmd.target) summary += `Target:${cmd.target.name || cmd.target.id} `;
+          if ('scene' in cmd) summary += `Scene:${cmd.scene} `;
+          if ('mood' in cmd) summary += `Mood:${cmd.mood} `;
+          if ('eventType' in cmd) summary += `Event:${cmd.eventType} `;
+          addWalkerLog('OUT', cmd.type, summary.trim() || 'Command Sent', cmd);
+
+          // If updating state, refresh
+          if (cmd.type === 'UPDATE_WALKER_META' || cmd.type === 'SET_MOOD') {
+              // Optimistic update or wait for next heartbeat?
+              // Let's ask for state update immediately
+              setTimeout(() => {
+                  if(walkersConn?.open) {
+                      walkersConn.send({type: 'LIST_WALKERS'});
+                      walkersConn.send({type: 'GET_STATE'});
+                      addWalkerLog('OUT', 'COMMAND', 'Auto-refresh State');
+                  }
+              }, 200);
+          }
+      } else {
+          addLog('error', '[Walkers] Not connected');
+          addWalkerLog('SYS', 'ERROR', 'Attempted to send command while disconnected');
+      }
+  };
+
   const handleButtonPress = (btn: SoundItem) => {
-      // Wake Lock Refresh on interaction
       if (twitchConfig.preventSleep) activateWakeLock();
 
       if (isEditMode) {
@@ -825,12 +991,9 @@ const ControlDeck: React.FC = () => {
           return;
       }
       
-      // Connected OR Demo Mode:
       if (status === 'CONNECTED' || isDemoMode) {
-          // If Connected, send to remote
           if (status === 'CONNECTED') sendTriggerPayload(btn);
           
-          // If Demo Mode, also trigger local overlay and play sound locally
           if (isDemoMode) {
              const defaultSound = DEFAULT_SOUND_BOARD.find(s => s.id === btn.id);
              triggerDemoAlert({ 
@@ -845,7 +1008,6 @@ const ControlDeck: React.FC = () => {
              playSynthSound(btn.soundPreset || btn.id, btn.soundUrl);
           }
       } else {
-          // Disconnected/Offline: Play Locally only
           playSynthSound(btn.soundPreset || btn.id, btn.soundUrl);
       }
   };
@@ -903,7 +1065,6 @@ const ControlDeck: React.FC = () => {
           totalVotes: 0
       };
       setPoll(newPoll);
-      // Handled by useEffect
   };
 
   const endPoll = () => {
@@ -918,11 +1079,6 @@ const ControlDeck: React.FC = () => {
   const sendPollReaction = (optId: string, type: 'up' | 'down') => {
       if (conn && conn.open) {
           conn.send({ type: 'POLL_REACTION', optionId: optId, reaction: type });
-      }
-      if (isDemoMode) {
-          // In demo mode we can't easily visualize this on the tablet overlay preview without more state lifting,
-          // but we can log it.
-          console.log("Demo Reaction:", optId, type);
       }
   };
 
@@ -940,7 +1096,6 @@ const ControlDeck: React.FC = () => {
   };
 
   const celebrateEvent = (evt: StreamEvent) => {
-      // 1. Determine template based on event type
       const templates = twitchConfig.eventTemplates || DEFAULT_EVENT_TEMPLATES;
       let template = templates.follow;
       let sfxPreset = 'ui-success';
@@ -964,7 +1119,6 @@ const ControlDeck: React.FC = () => {
 
       const label = template.replace('{user}', evt.username);
 
-      // 2. Trigger on Overlay
       if (conn && conn.open) {
           conn.send({
               type: 'TRIGGER_SFX',
@@ -988,7 +1142,6 @@ const ControlDeck: React.FC = () => {
           playSynthSound(sfxPreset);
       }
 
-      // 3. Dismiss from list
       dismissEvent(evt.id);
   };
 
@@ -1010,19 +1163,13 @@ const ControlDeck: React.FC = () => {
       return (
           <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4 relative">
               
-              {/* HIDDEN VIDEO HACK ELEMENT */}
               <video 
                   ref={hiddenVideoRef} 
-                  playsInline 
-                  muted 
-                  loop 
-                  width="1" 
-                  height="1" 
+                  playsInline muted loop width="1" height="1" 
                   style={{ position: 'absolute', opacity: 0.01, pointerEvents: 'none' }}
                   src="data:video/mp4;base64,AAAAHGZ0eXBNNBBwAAAAAAAAbW9vdgAAAABsbXZoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA7gAAAAEAAAEAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAdHJhawAAAFx0a2hkAAAAAdAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAABAAAAAmdtZGwAAAAUZ21pbgAAAAAAAAABAAAAEFFzbWhkAAAAAAAAAAAAAAJkaGluZgAAABRkaW5mAAAAAGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAA5zdGJsAAAAFHN0c2QAAAAAAAAAAQAAAARtcDR2AAAAFHN0dHMAAAAAAAAAAQAAAAEAAAAcc3RzYwAAAAAAAAABAAAAAQAAAAEAAAABAAAAFHN0c3oAAAAAAAAAEAAAAAEAAAAUc3RjbwAAAAAAAAABAAAAAAAAYXVkYXQ="
               />
 
-              {/* Onboarding Bubble for Connect Screen */}
               {showOnboarding && (
                   <div className="absolute z-50 top-4 right-4 md:right-auto md:top-auto md:mb-64 animate-bounce-in max-w-xs w-full">
                       <div className="bg-gray-800 border-2 border-purple-500 rounded-xl p-4 shadow-2xl relative">
@@ -1075,26 +1222,20 @@ const ControlDeck: React.FC = () => {
   return (
     <div className="w-full h-screen flex flex-col md:flex-row bg-gray-900 text-white relative overflow-hidden">
       
-      {/* HIDDEN VIDEO HACK ELEMENT (Main View) */}
       <video 
           ref={hiddenVideoRef} 
-          playsInline 
-          muted 
-          loop 
-          width="1" 
-          height="1" 
+          playsInline muted loop width="1" height="1" 
           style={{ position: 'absolute', opacity: 0.01, pointerEvents: 'none' }}
           src="data:video/mp4;base64,AAAAHGZ0eXBNNBBwAAAAAAAAbW9vdgAAAABsbXZoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA7gAAAAEAAAEAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAdHJhawAAAFx0a2hkAAAAAdAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAABAAAAAmdtZGwAAAAUZ21pbgAAAAAAAAABAAAAEFFzbWhkAAAAAAAAAAAAAAJkaGluZgAAABRkaW5mAAAAAGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAA5zdGJsAAAAFHN0c2QAAAAAAAAAAQAAAARtcDR2AAAAFHN0dHMAAAAAAAAAAQAAAAEAAAAcc3RzYwAAAAAAAAABAAAAAQAAAAEAAAABAAAAFHN0c3oAAAAAAAAAEAAAAAEAAAAUc3RjbwAAAAAAAAABAAAAAAAAYXVkYXQ="
       />
 
-      {/* DEMO OVERLAY PREVIEW LAYER */}
       {isDemoMode && (
           <div className="fixed inset-0 z-50 pointer-events-none">
               <OverlayDisplay activeAlert={demoActiveAlert} activePoll={poll} isDemo={true} />
           </div>
       )}
 
-      {/* Sidebar (Expands to full width in Deck Only mode) */}
+      {/* Sidebar */}
       <div className={`${isDeckOnlyMode ? 'w-full' : 'md:w-72'} bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-[50vh] md:h-full z-40 shadow-xl transition-all duration-300`}>
          
          {/* Top Status */}
@@ -1118,7 +1259,7 @@ const ControlDeck: React.FC = () => {
                         <button 
                             onClick={connectToOverlay} 
                             className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded text-gray-300 hover:text-white"
-                            title="Force Reconnect"
+                            title="Force Reconnect Overlay"
                         >
                             <Zap className="w-3 h-3" />
                         </button>
@@ -1207,59 +1348,96 @@ const ControlDeck: React.FC = () => {
              
              {/* Header */}
              <div className="flex justify-between items-center p-4 bg-gray-900 border-b border-gray-800 flex-shrink-0">
-                 <h1 className="text-xl font-bold text-gray-400 flex items-center gap-2"><Volume2 className="w-5 h-5" /> Soundboard</h1>
+                 {/* MODE TOGGLE */}
+                 <div className="bg-gray-800 rounded-full p-1 flex">
+                     <button 
+                        onClick={() => setViewMode('soundboard')}
+                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-2 ${viewMode === 'soundboard' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                     >
+                         <Volume2 className="w-3 h-3"/> Soundboard
+                     </button>
+                     <button 
+                        onClick={() => setViewMode('walkers')}
+                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-2 ${viewMode === 'walkers' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}
+                     >
+                         <Gamepad2 className="w-3 h-3"/> Stream Walkers
+                     </button>
+                 </div>
+
                  <div className="flex items-center gap-2">
-                     {status !== 'CONNECTED' && !isDemoMode && (
+                     {status !== 'CONNECTED' && !isDemoMode && viewMode === 'soundboard' && (
                          <div className="text-xs text-yellow-500 font-bold animate-pulse px-2 flex items-center gap-1 border border-yellow-500/50 rounded bg-yellow-900/20">
                              <WifiOff className="w-3 h-3"/> Reconnecting...
                          </div>
                      )}
-                     <button 
-                        onClick={() => setIsEditMode(!isEditMode)} 
-                        className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition ${isEditMode ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500 animate-pulse' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}
-                     >
-                         <Edit2 className="w-3 h-3" /> {isEditMode ? 'Done Editing' : 'Edit Buttons'}
-                     </button>
+                     
+                     {/* Edit Button (Only for Soundboard) */}
+                     {viewMode === 'soundboard' && (
+                        <button 
+                            onClick={() => setIsEditMode(!isEditMode)} 
+                            className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition ${isEditMode ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500 animate-pulse' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}
+                        >
+                            <Edit2 className="w-3 h-3" /> {isEditMode ? 'Done Editing' : 'Edit Buttons'}
+                        </button>
+                     )}
                  </div>
              </div>
              
-             {/* Scrollable Grid */}
-             <div className="flex-1 overflow-y-auto p-4">
-                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-20">
-                    {soundButtons.map(sound => {
-                        const IconComp = (Icons as any)[sound.iconName] || Icons.Zap;
-                        return (
-                            <button
-                                key={sound.id}
-                                onClick={() => handleButtonPress(sound)}
-                                className={`relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-b-8 active:border-b-0 active:translate-y-2 h-32 overflow-hidden group
-                                    ${isEditMode ? 'border-dashed border-2 bg-gray-800 border-gray-600 hover:border-yellow-500 cursor-alias' : `${sound.color} border-black/20 hover:scale-105`}
-                                `}
-                            >
-                                {isEditMode && <div className="absolute top-2 right-2 bg-black/50 p-1 rounded-full z-10"><Edit2 className="w-3 h-3 text-white" /></div>}
-                                <IconComp className={`w-8 h-8 ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`} />
-                                <span className={`font-black text-lg tracking-wider ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`}>{sound.label}</span>
-                                {!isEditMode && sound.animation && sound.animation !== 'none' && (
-                                    <div className="absolute bottom-2 right-2 opacity-50"><Icons.Sparkles className="w-3 h-3" /></div>
-                                )}
-                            </button>
-                        );
-                    })}
+             {/* MODE: SOUNDBOARD */}
+             {viewMode === 'soundboard' && (
+                 <div className="flex-1 overflow-y-auto p-4">
+                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-20">
+                        {soundButtons.map(sound => {
+                            const IconComp = (Icons as any)[sound.iconName] || Icons.Zap;
+                            return (
+                                <button
+                                    key={sound.id}
+                                    onClick={() => handleButtonPress(sound)}
+                                    className={`relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-b-8 active:border-b-0 active:translate-y-2 h-32 overflow-hidden group
+                                        ${isEditMode ? 'border-dashed border-2 bg-gray-800 border-gray-600 hover:border-yellow-500 cursor-alias' : `${sound.color} border-black/20 hover:scale-105`}
+                                    `}
+                                >
+                                    {isEditMode && <div className="absolute top-2 right-2 bg-black/50 p-1 rounded-full z-10"><Edit2 className="w-3 h-3 text-white" /></div>}
+                                    <IconComp className={`w-8 h-8 ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`} />
+                                    <span className={`font-black text-lg tracking-wider ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`}>{sound.label}</span>
+                                    {!isEditMode && sound.animation && sound.animation !== 'none' && (
+                                        <div className="absolute bottom-2 right-2 opacity-50"><Icons.Sparkles className="w-3 h-3" /></div>
+                                    )}
+                                </button>
+                            );
+                        })}
 
-                    {/* ADD NEW BUTTON (Visible in Edit Mode) */}
-                    {isEditMode && (
-                        <button
-                            onClick={addNewButton}
-                            className="relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-600 bg-gray-800/50 hover:bg-gray-800 hover:border-green-500 group h-32"
-                        >
-                            <div className="p-3 rounded-full bg-gray-800 group-hover:bg-green-900/30 transition-colors">
-                                <Plus className="w-8 h-8 text-gray-500 group-hover:text-green-500" />
-                            </div>
-                            <span className="font-bold text-sm text-gray-500 group-hover:text-green-500 uppercase tracking-widest">Add New</span>
-                        </button>
-                    )}
+                        {/* ADD NEW BUTTON (Visible in Edit Mode) */}
+                        {isEditMode && (
+                            <button
+                                onClick={addNewButton}
+                                className="relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-600 bg-gray-800/50 hover:bg-gray-800 hover:border-green-500 group h-32"
+                            >
+                                <div className="p-3 rounded-full bg-gray-800 group-hover:bg-green-900/30 transition-colors">
+                                    <Plus className="w-8 h-8 text-gray-500 group-hover:text-green-500" />
+                                </div>
+                                <span className="font-bold text-sm text-gray-500 group-hover:text-green-500 uppercase tracking-widest">Add New</span>
+                            </button>
+                        )}
+                     </div>
                  </div>
-             </div>
+             )}
+
+             {/* MODE: STREAM WALKERS */}
+             {viewMode === 'walkers' && (
+                 <StreamWalkersPanel 
+                     status={walkersStatus}
+                     code={walkersCode}
+                     setCode={setWalkersCode}
+                     onConnect={connectToWalkers}
+                     onDisconnect={() => { if(walkersConn) walkersConn.close(); setWalkersAutoReconnect(false); }}
+                     onCommand={sendWalkersCommand}
+                     walkersList={walkersList}
+                     serverState={walkersServerState}
+                     latency={walkersLatency}
+                     walkersLogs={walkersLogs}
+                 />
+             )}
           </div>
       )}
 
@@ -1285,28 +1463,42 @@ const ControlDeck: React.FC = () => {
             {/* Connection Stats Panel */}
             <div className="grid grid-cols-2 gap-2 p-2 bg-gray-900/50 border-b border-gray-800 text-[10px]">
                 <div className="flex justify-between">
-                    <span className="text-gray-500">Peer ID:</span>
+                    <span className="text-gray-500">Overlay ID:</span>
                     <span className="text-white">{inputCode ? `...${inputCode}` : 'N/A'}</span>
                 </div>
                  <div className="flex justify-between">
-                    <span className="text-gray-500">Status:</span>
+                    <span className="text-gray-500">Overlay Status:</span>
                     <span className={`${status === 'CONNECTED' ? 'text-green-400' : 'text-red-400'} font-bold`}>{status}</span>
                 </div>
                 <div className="flex justify-between">
-                    <span className="text-gray-500">Latency:</span>
+                    <span className="text-gray-500">Overlay Latency:</span>
                     <span className="text-white">{latency ? `${latency}ms` : 'N/A'}</span>
                 </div>
+                
+                {/* Walkers Stats */}
+                <div className="flex justify-between border-t border-gray-700 pt-1 mt-1 col-span-2">
+                    <span className="text-blue-400 font-bold">Stream Walkers</span>
+                </div>
                 <div className="flex justify-between">
-                    <span className="text-gray-500">Last Pong:</span>
-                    <span className={Date.now() - lastPongRef.current > 5000 ? 'text-red-400' : 'text-green-400'}>
-                        {Math.floor((Date.now() - lastPongRef.current) / 1000)}s ago
-                    </span>
+                    <span className="text-gray-500">Walkers ID:</span>
+                    <span className="text-white">{walkersCode ? `...${walkersCode}` : 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                    <span className="text-gray-500">Status:</span>
+                    <span className={`${walkersStatus === 'CONNECTED' ? 'text-green-400' : 'text-red-400'} font-bold`}>{walkersStatus}</span>
+                </div>
+                <div className="flex justify-between">
+                     <span className="text-gray-500">Latency:</span>
+                     <span className="text-white">{walkersLatency ? `${walkersLatency}ms` : 'N/A'}</span>
                 </div>
             </div>
             
-            <div className="p-2 border-b border-gray-800">
-                <button onClick={connectToOverlay} className="w-full bg-red-900/40 hover:bg-red-900/60 text-red-300 border border-red-800 p-1 rounded font-bold text-xs uppercase flex items-center justify-center gap-2">
-                    <Zap className="w-3 h-3"/> Force Full Reconnect
+            <div className="p-2 border-b border-gray-800 flex gap-2">
+                <button onClick={connectToOverlay} className="flex-1 bg-red-900/40 hover:bg-red-900/60 text-red-300 border border-red-800 p-1 rounded font-bold text-xs uppercase flex items-center justify-center gap-2">
+                    <Zap className="w-3 h-3"/> Reconnect Overlay
+                </button>
+                <button onClick={connectToWalkers} className="flex-1 bg-blue-900/40 hover:bg-blue-900/60 text-blue-300 border border-blue-800 p-1 rounded font-bold text-xs uppercase flex items-center justify-center gap-2">
+                    <Zap className="w-3 h-3"/> Reconnect Walkers
                 </button>
             </div>
 

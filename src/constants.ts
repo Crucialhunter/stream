@@ -1,8 +1,11 @@
 
+
 import { SoundItem, EventTemplates } from './types';
 
 export const PEER_ID_PREFIX = 'streamdeck-app-v1-';
 export const SYNC_PEER_PREFIX = 'streamdeck-sync-v1-';
+// The ID prefix that the Stream Walkers Overlay (Host) is listening on
+export const WALKERS_PEER_PREFIX = 'streamwalkers-host-v1-';
 
 export const FONT_STYLES = [
   { id: 'standard', label: 'Standard', family: 'ui-sans-serif, system-ui' },
@@ -29,6 +32,32 @@ export const DEFAULT_EVENT_TEMPLATES: EventTemplates = {
     raid: 'Raid incoming from {user}!',
     cheer: '{user} cheered bits!'
 };
+
+// --- STREAM WALKERS CONSTANTS ---
+
+export const WALKER_MOODS = ['DEFAULT', 'CHILL', 'PARTY', 'CHAOS', 'SLEEP'];
+
+export const WALKER_EVENTS = [
+  { id: 'METEOR_SHOWER', label: 'Meteors' },
+  { id: 'FLOOD', label: 'Flood' },
+  { id: 'EARTHQUAKE', label: 'Quake' },
+  { id: 'CONFETTI', label: 'Confetti' }
+];
+
+export const WALKER_SCENES = [
+  { id: 'RAID_WELCOME', label: 'Raid Welcome' },
+  { id: 'BRB', label: 'BRB' },
+  { id: 'STREAM_END', label: 'Stream End' }
+];
+
+export const WALKER_ITEMS = ['COIN', 'HEART', 'BOMB'];
+
+export const WALKER_EMOTES = [
+  { id: 'happy', label: 'Happy' },
+  { id: 'sad', label: 'Sad' },
+  { id: 'shocked', label: 'Shocked' },
+  { id: 'excited', label: 'Excited' }
+];
 
 export const SOUND_LIBRARY = {
   'retro': [
