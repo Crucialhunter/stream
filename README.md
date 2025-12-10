@@ -7,24 +7,35 @@ A powerful, browser-based streaming companion app. Turn your tablet or phone int
 
 ### 🎮 Remote Control Deck
 - **Soundboard**: Trigger visual and audio alerts (HYPE, FAIL, GG, etc.) on your stream overlay instantly.
-- **Customizable Buttons**: Enter "Edit Mode" to change button labels, colors, and assign custom Sound URLs or GIF/Image URLs for the overlay.
+- **Customizable Buttons**: Enter "Edit Mode" to change button labels, colors, icons, fonts, animations, and assign custom Sound URLs or GIF/Image URLs.
 - **Low Latency**: Uses PeerJS for direct Peer-to-Peer communication between your control device and your PC/OBS.
+- **Robust Connection**: Includes advanced sleep prevention (Wake Lock + Video Hack) and aggressive auto-reconnection to ensure your deck stays connected even on mobile devices.
+
+### 📱 Deck Only Mode (Chat Monitor)
+- **Dedicated Monitor**: Use your device purely for tracking chat without the overlay controls.
+- **Read/Unread Tracking**: Messages are highlighted until marked as read.
+- **Bulk Mark as Read**: Tapping a checkmark clears that message and all older messages, helping you keep track of where you left off.
 
 ### 💜 Twitch Integration
-- **Live Chat Monitor**: See chat messages in real-time.
-- **Show on Stream**: Tap the "Monitor" icon next to any chat message to display it as a featured card on your overlay.
-- **Events Panel**: Track new Followers and Subscribers in a dedicated tab. Acknowledge them to clear the list.
-- **Chat Commands**: Viewers can trigger sounds using commands like `!hype`, `!fail`, `!gg`.
-- **Emote Support**: Displays Twitch emotes natively in the chat window.
+- **Live Chat Monitor**: See chat messages in real-time with emote support.
+- **Show on Stream**: Tap the "Monitor" icon next to any chat message to display it as a featured card on your overlay (Control Mode only).
+- **Events Panel**: Track new Followers, Subscribers, Raids, and Cheers in a dedicated tab.
+- **Custom Celebrations**: Click the "Celebrate" button on an event to trigger a customizable alert on stream (e.g., "{user} just subscribed!").
+- **Chat Commands**: Viewers can trigger sounds using commands like `!hype`, `!fail`, `!gg` (if configured).
 
 ### 📊 Audience Interaction
-- **Polls & Predictions**: Create quick polls from the "Tools" tab. Viewers vote by typing numbers (1, 2, 3...) in chat.
-- **Live Visuals**: The overlay displays a real-time bar chart of the poll results.
+- **Polls**: Create quick polls from the "Tools" tab. Viewers vote by typing numbers (1, 2, 3...) in chat.
+- **Real-time Visuals**: The overlay displays a dynamic bar chart of the results.
+- **Poll Reactions**: As the streamer, you can trigger "Up/Down" visual reactions on specific poll options to hype up the voting on the overlay.
 
 ### 🎥 OBS Overlay
-- **Browser Source Ready**: Dedicated Overlay mode designed for OBS.
-- **Visual Effects**: Displays animations, custom images, featured chat messages, and polls.
+- **Browser Source Ready**: Dedicated Overlay mode designed for 1920x1080 resolution.
+- **Visual Effects**: Displays animations, custom images, featured chat messages, and poll results.
 - **Audio Feedback**: Plays synthesized sounds or custom audio files directly from the overlay source.
+
+### 🔄 Sync & Backup
+- **P2P Sync**: Send your entire profile (buttons + settings) from one device to another wirelessly.
+- **Backup**: Export your configuration to a JSON file for safekeeping.
 
 ## 🚀 Getting Started
 
@@ -40,37 +51,48 @@ A powerful, browser-based streaming companion app. Turn your tablet or phone int
 1.  Add a **Browser Source** in OBS.
 2.  **URL**: `http://localhost:5173/#/overlay`
 3.  **Width**: `1920`, **Height**: `1080`
-4.  **Control Audio via OBS**: Checked.
+4.  **Control Audio via OBS**: Checked (Recommended).
 
 ### 3. Connecting the Control Deck
 
 1.  Open the app on your Tablet/Phone (`http://YOUR_PC_IP:5173`).
-2.  Enter the **4-digit code** displayed on your OBS Overlay.
-3.  Click **CONNECT**.
+2.  **Control Mode**: Enter the **4-digit code** displayed on your OBS Overlay and click **CONNECT**.
+3.  **Deck Only Mode**: Click "Deck Only (Chat Monitor)" at the bottom if you only want to read chat.
 
 ## ⚙️ Twitch Configuration
 
-1.  Click **Config** (Gear Icon).
-2.  **Client ID**: Get this from [Twitch Dev Console](https://dev.twitch.tv/console). Set Redirect URI to `http://localhost:5173`.
-3.  **Channel**: Enter your username.
-4.  **Connect**: Click the button to authorize.
+1.  Click **Config** (Gear Icon) in the sidebar.
+2.  **Client ID**: Get this from [Twitch Dev Console](https://dev.twitch.tv/console). Set Redirect URI to `http://localhost:5173` (or your local IP).
+3.  **Channel**: Enter your Twitch username.
+4.  **Connect**: Click the button to authorize and get your token.
+5.  **Events Tab**: Customize the text templates used when celebrating events (e.g., "{user} is now following!").
 
-## 🎮 How to Use New Features
+## 🎮 How to Use
+
+### Managing Chat (Deck Only Mode)
+- **Unread Messages**: Appear with a purple tint and bright border.
+- **Mark Read**: Tap the checkmark on a message. That message *and all messages above it* (older ones) will be marked as read.
+
+### Creating a Poll
+1.  Go to the **"Tools"** tab.
+2.  Enter a Question and Options.
+3.  Click **Start Poll**.
+4.  Use the **Up/Down Arrows** next to options to trigger visual reactions on the overlay.
+5.  Click **End Poll** to finish.
+
+### Triggering Event Celebrations
+1.  Go to the **"Events"** tab.
+2.  When an event (Sub, Follow, etc.) appears, click **"OK" (Celebrate)**.
+3.  This triggers an alert on the overlay using the template defined in Settings.
+4.  Click **"X"** to dismiss the event without celebrating.
 
 ### Customizing Buttons
 1.  Click the **"Edit Buttons"** toggle on the main dashboard.
 2.  Tap any button to open the editor.
-3.  Paste a URL for a sound (mp3/wav) or an image (gif/png).
-4.  Click Save and exit Edit Mode.
+3.  Customize Label, Icon, Color, Sound, Image, Font, and Animation.
+4.  Click **Save** and exit Edit Mode.
 
-### Creating a Poll
-1.  Go to the **"Tools"** tab in the sidebar.
-2.  Enter a Question and Options.
-3.  Click **Start Poll**.
-4.  Viewers vote by typing "1", "2", etc. in chat.
-5.  Click **End Poll** to finish.
-
-### Showing Chat on Stream
-1.  In the **Chat** tab, hover over (or tap) a message.
-2.  Click the **Monitor/Screen Icon** that appears.
-3.  The message will pop up on your Overlay for 10 seconds.
+### Syncing Profiles
+1.  Go to **Settings > Sync**.
+2.  **Sender**: Click "Start as Sender" to generate a code.
+3.  **Receiver**: Enter that code on the new device and click "Connect".

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Peer } from 'peerjs';
 import { ArrowLeft, Volume2, Info } from 'lucide-react';
@@ -10,11 +11,14 @@ const Overlay: React.FC = () => {
   const [code, setCode] = useState<string>('');
   const [activeAlert, setActiveAlert] = useState<ActiveAlert | null>(null);
   const [activePoll, setActivePoll] = useState<PollState | null>(null);
+  const [pollReactions, setPollReactions] = useState<Record<string, 'up' | 'down'>>({});
+  
   const [isConnected, setIsConnected] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   
   const alertTimeoutRef = useRef<number | null>(null);
+  const reactionTimeoutsRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     // Generate pairing code
@@ -97,6 +101,22 @@ const Overlay: React.FC = () => {
     if (payload.type === 'POLL_END') {
         setTimeout(() => setActivePoll(null), 5000);
     }
+    if (payload.type === 'POLL_REACTION') {
+        // Clear existing timeout for this option if exists
+        if (reactionTimeoutsRef.current[payload.optionId]) {
+            clearTimeout(reactionTimeoutsRef.current[payload.optionId]);
+        }
+        
+        setPollReactions(prev => ({ ...prev, [payload.optionId]: payload.reaction }));
+        
+        reactionTimeoutsRef.current[payload.optionId] = window.setTimeout(() => {
+            setPollReactions(prev => {
+                const newState = { ...prev };
+                delete newState[payload.optionId];
+                return newState;
+            });
+        }, 3000);
+    }
   };
 
   // --- AUDIO UNLOCK OVERLAY (Floating Card) ---
@@ -116,7 +136,7 @@ const Overlay: React.FC = () => {
 
   // Render Display Component (Alerts / Polls)
   if (activeAlert || activePoll) {
-      return <OverlayDisplay activeAlert={activeAlert} activePoll={activePoll} />;
+      return <OverlayDisplay activeAlert={activeAlert} activePoll={activePoll} pollReactions={pollReactions} />;
   }
 
   // --- SETUP SCREEN (Floating Card / Idle State) ---

@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Peer, DataConnection } from 'peerjs';
-import { Settings as SettingsIcon, Check, Copy, ExternalLink, ArrowLeft, ShieldCheck, AlertCircle, Zap, Maximize, Minimize, Share2, Download, Upload, Smartphone, Monitor } from 'lucide-react';
+import { Settings as SettingsIcon, Check, Copy, ExternalLink, ArrowLeft, ShieldCheck, AlertCircle, Zap, Maximize, Minimize, Share2, Download, Upload, Smartphone, Monitor, Heart, MessageSquare } from 'lucide-react';
 import { TwitchConfig, SoundItem, DeckConfig, SyncPayload } from '../types';
-import { TWITCH_AUTH_BASE, TWITCH_SCOPES, SYNC_PEER_PREFIX } from '../constants';
+import { TWITCH_AUTH_BASE, TWITCH_SCOPES, SYNC_PEER_PREFIX, DEFAULT_EVENT_TEMPLATES } from '../constants';
 import { exportConfigToJson, validateConfig } from '../services/configService';
 
 interface SettingsProps {
@@ -20,7 +21,7 @@ const Settings: React.FC<SettingsProps> = ({
   onBack, isFullscreen, toggleFullscreen 
 }) => {
   // Tab State
-  const [activeTab, setActiveTab] = useState<'general' | 'sync'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'events' | 'sync'>('general');
 
   // --- GENERAL SETTINGS STATE ---
   const [clientId, setClientId] = useState(config.clientId);
@@ -31,6 +32,9 @@ const Settings: React.FC<SettingsProps> = ({
   const [preventSleep, setPreventSleep] = useState(config.preventSleep || false);
   const [isValidating, setIsValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<{valid: boolean; msg: string} | null>(null);
+
+  // --- EVENTS SETTINGS STATE ---
+  const [templates, setTemplates] = useState(config.eventTemplates || DEFAULT_EVENT_TEMPLATES);
 
   // --- SYNC STATE ---
   const [syncCode, setSyncCode] = useState(''); // User input for receiver
@@ -111,7 +115,7 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const saveGeneralSettings = () => {
+  const saveSettings = () => {
     const cleanToken = manualToken.replace(/^oauth:/, '').trim();
     const cleanChannel = channel.replace(/^#/, '').trim().toLowerCase();
     
@@ -120,7 +124,8 @@ const Settings: React.FC<SettingsProps> = ({
       accessToken: cleanToken,
       channel: cleanChannel,
       viewerUpdateInterval: Number(viewerInterval),
-      preventSleep
+      preventSleep,
+      eventTemplates: templates
     });
     // Note: ControlDeck effects will handle persisting to localStorage/ConfigService
     onBack();
@@ -151,7 +156,8 @@ const Settings: React.FC<SettingsProps> = ({
                           accessToken: manualToken,
                           channel,
                           viewerUpdateInterval: Number(viewerInterval),
-                          preventSleep
+                          preventSleep,
+                          eventTemplates: templates
                       }
                   }
               };
@@ -211,6 +217,9 @@ const Settings: React.FC<SettingsProps> = ({
           setManualToken(incomingConfig.twitchConfig.accessToken);
           setChannel(incomingConfig.twitchConfig.channel);
           setPreventSleep(incomingConfig.twitchConfig.preventSleep || false);
+          if (incomingConfig.twitchConfig.eventTemplates) {
+              setTemplates(incomingConfig.twitchConfig.eventTemplates);
+          }
           
           setIncomingConfig(null);
           setSyncStatus('IDLE');
@@ -229,7 +238,8 @@ const Settings: React.FC<SettingsProps> = ({
             accessToken: manualToken, 
             channel, 
             viewerUpdateInterval: Number(viewerInterval), 
-            preventSleep 
+            preventSleep,
+            eventTemplates: templates
           }
       };
       exportConfigToJson(currentConfig);
@@ -286,10 +296,16 @@ const Settings: React.FC<SettingsProps> = ({
                 General
             </button>
             <button 
+                onClick={() => setActiveTab('events')}
+                className={`flex-1 py-4 font-bold text-sm uppercase tracking-widest border-b-2 transition ${activeTab === 'events' ? 'border-purple-500 text-purple-400 bg-gray-800' : 'border-transparent text-gray-500 hover:text-white'}`}
+            >
+                Events
+            </button>
+            <button 
                 onClick={() => setActiveTab('sync')}
                 className={`flex-1 py-4 font-bold text-sm uppercase tracking-widest border-b-2 transition ${activeTab === 'sync' ? 'border-purple-500 text-purple-400 bg-gray-800' : 'border-transparent text-gray-500 hover:text-white'}`}
             >
-                Profile & Sync
+                Sync
             </button>
         </div>
 
@@ -361,9 +377,64 @@ const Settings: React.FC<SettingsProps> = ({
                  </div>
 
                  <div className="flex justify-end pt-4">
-                    <button onClick={saveGeneralSettings} className="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold shadow-lg flex items-center"><Check className="w-5 h-5 mr-2"/> Save Changes</button>
+                    <button onClick={saveSettings} className="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold shadow-lg flex items-center"><Check className="w-5 h-5 mr-2"/> Save Changes</button>
                  </div>
               </>
+          )}
+
+          {/* === EVENTS TAB === */}
+          {activeTab === 'events' && (
+              <div className="space-y-6">
+                  <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden">
+                      <div className="p-4 bg-pink-900/20 border-b border-gray-700 flex items-center gap-3">
+                          <div className="p-2 bg-pink-600 rounded-lg"><Heart className="w-5 h-5 text-white"/></div>
+                          <div>
+                              <h3 className="font-bold text-lg">Event Celebrations</h3>
+                              <p className="text-xs text-gray-400">Customize the text shown on screen when you click 'Celebrate' on an event.</p>
+                          </div>
+                      </div>
+                      <div className="p-6 space-y-4">
+                          <p className="text-xs text-gray-500 bg-gray-900 p-3 rounded border border-gray-800">
+                              <span className="font-bold text-yellow-500">Tip:</span> Use <code className="text-purple-400">{'{user}'}</code> as a placeholder for the viewer's name.
+                          </p>
+                          <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">New Follower</label>
+                              <input 
+                                value={templates.follow} 
+                                onChange={(e) => setTemplates({...templates, follow: e.target.value})} 
+                                className="w-full bg-gray-900 border border-gray-700 rounded p-3 focus:border-pink-500 outline-none" 
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Subscription</label>
+                              <input 
+                                value={templates.sub} 
+                                onChange={(e) => setTemplates({...templates, sub: e.target.value})} 
+                                className="w-full bg-gray-900 border border-gray-700 rounded p-3 focus:border-pink-500 outline-none" 
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Raid</label>
+                              <input 
+                                value={templates.raid} 
+                                onChange={(e) => setTemplates({...templates, raid: e.target.value})} 
+                                className="w-full bg-gray-900 border border-gray-700 rounded p-3 focus:border-pink-500 outline-none" 
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cheer</label>
+                              <input 
+                                value={templates.cheer} 
+                                onChange={(e) => setTemplates({...templates, cheer: e.target.value})} 
+                                className="w-full bg-gray-900 border border-gray-700 rounded p-3 focus:border-pink-500 outline-none" 
+                              />
+                          </div>
+                      </div>
+                  </div>
+                  <div className="flex justify-end pt-4">
+                    <button onClick={saveSettings} className="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold shadow-lg flex items-center"><Check className="w-5 h-5 mr-2"/> Save Changes</button>
+                 </div>
+              </div>
           )}
 
           {/* === PROFILE & SYNC TAB === */}

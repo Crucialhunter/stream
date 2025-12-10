@@ -1,11 +1,13 @@
+
 import React from 'react';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, ArrowUp, ArrowDown } from 'lucide-react';
 import { ActiveAlert, PollState, FontStyle, AnimationStyle } from '../types';
 import { FONT_STYLES } from '../constants';
 
 interface OverlayDisplayProps {
   activeAlert: ActiveAlert | null;
   activePoll: PollState | null;
+  pollReactions?: Record<string, 'up' | 'down'>;
   isDemo?: boolean;
 }
 
@@ -28,7 +30,7 @@ const getAnimationClass = (anim?: AnimationStyle) => {
   }
 };
 
-const OverlayDisplay: React.FC<OverlayDisplayProps> = ({ activeAlert, activePoll, isDemo }) => {
+const OverlayDisplay: React.FC<OverlayDisplayProps> = ({ activeAlert, activePoll, pollReactions = {}, isDemo }) => {
   
   // Render Poll Widget
   const renderPoll = () => {
@@ -40,11 +42,16 @@ const OverlayDisplay: React.FC<OverlayDisplayProps> = ({ activeAlert, activePoll
               <h3 className="text-white font-bold text-lg mb-3 border-b border-gray-700 pb-2">{activePoll.question}</h3>
               <div className="space-y-3">
                   {activePoll.options.map(opt => {
+                      const reaction = pollReactions[opt.id];
                       return (
                           <div key={opt.id} className="relative">
                               <div className="flex justify-between text-white text-sm font-bold mb-1 relative z-10">
                                   <span><span className="text-yellow-400 mr-2">type "{opt.trigger}"</span> {opt.label}</span>
-                                  <span>{opt.votes}</span>
+                                  <div className="flex items-center gap-2">
+                                      {reaction === 'up' && <ArrowUp className="w-5 h-5 text-green-400 animate-bounce" />}
+                                      {reaction === 'down' && <ArrowDown className="w-5 h-5 text-red-400 animate-bounce" />}
+                                      <span>{opt.votes}</span>
+                                  </div>
                               </div>
                               <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
                                   <div 

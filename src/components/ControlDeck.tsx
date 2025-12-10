@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Peer, DataConnection } from 'peerjs';
-import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize, FlaskConical, PlayCircle, UserPlus, Users, MessageSquarePlus, Zap, Info } from 'lucide-react';
+import { Wifi, Settings as SettingsIcon, Radio, Volume2, Monitor, RefreshCw, Send, Terminal, X, Edit2, Plus, Trash2, Heart, Gift, BarChart2, Music, Type, Image as ImageIcon, Play, Save, WifiOff, Maximize, Minimize, FlaskConical, PlayCircle, UserPlus, Users, MessageSquarePlus, Zap, Info, PartyPopper, ArrowUp, ArrowDown, Eye, CheckCircle } from 'lucide-react';
 import * as Icons from 'lucide-react';
-import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD, SOUND_LIBRARY, FONT_STYLES, ANIMATION_STYLES } from '../constants';
+import { PEER_ID_PREFIX, DEFAULT_SOUND_BOARD, SOUND_LIBRARY, FONT_STYLES, ANIMATION_STYLES, DEFAULT_EVENT_TEMPLATES } from '../constants';
 import { PeerPayload, ChatMessage, TwitchConfig, SoundItem, StreamEvent, PollState, ActiveAlert } from '../types';
 import { TwitchIRC } from '../services/twitchIRC';
 import { playSynthSound } from '../services/audioService';
@@ -14,7 +15,12 @@ import Settings from './Settings';
 import OverlayDisplay from './OverlayDisplay';
 
 // --- EVENTS PANEL ---
-const EventsPanel: React.FC<{ events: StreamEvent[], onDismiss: (id: string) => void }> = ({ events, onDismiss }) => (
+const EventsPanel: React.FC<{ 
+    events: StreamEvent[], 
+    onDismiss: (id: string) => void,
+    onCelebrate: (evt: StreamEvent) => void,
+    isDeckOnlyMode?: boolean
+}> = ({ events, onDismiss, onCelebrate, isDeckOnlyMode }) => (
     <div className="flex-1 bg-gray-800 rounded-xl overflow-hidden flex flex-col border border-gray-700">
         <div className="p-3 bg-gray-750 font-bold border-b border-gray-700 flex items-center gap-2">
             <Heart className="w-4 h-4 text-pink-500" /> Recent Events
@@ -31,7 +37,15 @@ const EventsPanel: React.FC<{ events: StreamEvent[], onDismiss: (id: string) => 
                         <div className="text-xs text-gray-300">{evt.details}</div>
                     </div>
                     {!evt.seen && (
-                        <button onClick={() => onDismiss(evt.id)} className="text-xs bg-gray-600 hover:bg-gray-500 px-2 py-1 rounded">OK</button>
+                        <div className="flex gap-2">
+                            {/* In Deck Only mode, we don't have an overlay to celebrate on, so just 'Mark Seen' */}
+                            {!isDeckOnlyMode && (
+                                <button onClick={() => onCelebrate(evt)} className="text-xs bg-pink-600 hover:bg-pink-500 px-2 py-1 rounded flex items-center gap-1 font-bold" title="Celebrate on Stream"><PartyPopper className="w-3 h-3"/> OK</button>
+                            )}
+                            <button onClick={() => onDismiss(evt.id)} className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${isDeckOnlyMode ? 'bg-green-600 hover:bg-green-500' : 'bg-gray-600 hover:bg-gray-500'}`}>
+                                {isDeckOnlyMode ? <CheckCircle className="w-3 h-3"/> : 'X'}
+                            </button>
+                        </div>
                     )}
                 </div>
             ))}
@@ -40,7 +54,13 @@ const EventsPanel: React.FC<{ events: StreamEvent[], onDismiss: (id: string) => 
 );
 
 // --- POLL TOOL ---
-const PollTool: React.FC<{ activePoll: PollState | null, onCreate: (q: string, opts: string[]) => void, onEnd: () => void }> = ({ activePoll, onCreate, onEnd }) => {
+const PollTool: React.FC<{ 
+    activePoll: PollState | null, 
+    onCreate: (q: string, opts: string[]) => void, 
+    onEnd: () => void,
+    onReaction: (optId: string, type: 'up' | 'down') => void,
+    isDeckOnlyMode?: boolean
+}> = ({ activePoll, onCreate, onEnd, onReaction, isDeckOnlyMode }) => {
     const [question, setQuestion] = useState('');
     const [options, setOptions] = useState(['Yes', 'No']);
 
@@ -50,15 +70,26 @@ const PollTool: React.FC<{ activePoll: PollState | null, onCreate: (q: string, o
                 <div className="absolute inset-0 bg-purple-900/10 animate-pulse pointer-events-none" />
                 <h3 className="font-bold text-lg mb-4 text-white z-10">Active Poll</h3>
                 <div className="text-sm text-gray-300 mb-4 z-10">{activePoll.question}</div>
-                <div className="flex-1 space-y-2 z-10">
+                <div className="flex-1 space-y-2 z-10 overflow-y-auto">
                     {activePoll.options.map(opt => (
-                        <div key={opt.id} className="flex justify-between text-xs bg-gray-900 p-2 rounded border border-gray-700">
-                            <span>{opt.label} ({opt.trigger})</span>
-                            <span className="font-bold text-purple-400">{opt.votes}</span>
+                        <div key={opt.id} className="flex items-center justify-between text-xs bg-gray-900 p-2 rounded border border-gray-700">
+                            <div className="flex-1">
+                                <span>{opt.label} ({opt.trigger})</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="font-bold text-purple-400 text-lg mr-2">{opt.votes}</span>
+                                {!isDeckOnlyMode && (
+                                    <div className="flex gap-1">
+                                        <button onClick={() => onReaction(opt.id, 'up')} className="p-1 hover:bg-gray-700 rounded text-green-400"><ArrowUp className="w-4 h-4" /></button>
+                                        <button onClick={() => onReaction(opt.id, 'down')} className="p-1 hover:bg-gray-700 rounded text-red-400"><ArrowDown className="w-4 h-4" /></button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     ))}
                 </div>
-                <button onClick={onEnd} className="mt-4 w-full py-3 bg-red-600 hover:bg-red-500 rounded font-bold z-10">End Poll</button>
+                {!isDeckOnlyMode && <button onClick={onEnd} className="mt-4 w-full py-3 bg-red-600 hover:bg-red-500 rounded font-bold z-10 flex-shrink-0">End Poll</button>}
+                {isDeckOnlyMode && <div className="mt-4 text-center text-xs text-gray-500 italic">Poll controls disabled in Deck Mode</div>}
             </div>
         );
     }
@@ -92,13 +123,19 @@ const PollTool: React.FC<{ activePoll: PollState | null, onCreate: (q: string, o
                         <button onClick={() => setOptions([...options, ''])} className="text-xs text-purple-400 flex items-center gap-1 hover:underline"><Plus className="w-3 h-3"/> Add Option</button>
                     )}
                 </div>
-                <button 
-                    onClick={() => onCreate(question, options)}
-                    disabled={!question || options.some(o => !o)}
-                    className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 rounded font-bold mt-2"
-                >
-                    Start Poll
-                </button>
+                {!isDeckOnlyMode ? (
+                    <button 
+                        onClick={() => onCreate(question, options)}
+                        disabled={!question || options.some(o => !o)}
+                        className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 rounded font-bold mt-2"
+                    >
+                        Start Poll
+                    </button>
+                ) : (
+                    <button disabled className="w-full py-3 bg-gray-700 text-gray-500 rounded font-bold mt-2 cursor-not-allowed">
+                        Polls Disabled (Deck Mode)
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -305,6 +342,9 @@ const ControlDeck: React.FC = () => {
 
   // Demo Mode State
   const [isDemoMode, setIsDemoMode] = useState(false);
+  // Deck Only Mode State
+  const [isDeckOnlyMode, setIsDeckOnlyMode] = useState(false);
+
   const [demoActiveAlert, setDemoActiveAlert] = useState<ActiveAlert | null>(null);
   const demoAlertTimeout = useRef<number | null>(null);
 
@@ -322,6 +362,7 @@ const ControlDeck: React.FC = () => {
   // UI State
   const [isFullscreen, setIsFullscreen] = useState(false);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const hiddenVideoRef = useRef<HTMLVideoElement>(null); // "Video Hack"
 
   // Chat State
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -419,20 +460,33 @@ const ControlDeck: React.FC = () => {
   }, [isDemoMode]);
 
 
-  // --- WAKE LOCK LOGIC ---
-  const requestWakeLock = async () => {
+  // --- WAKE LOCK & SLEEP PREVENTION (Robust) ---
+  const activateWakeLock = async () => {
+      // 1. Native API
       if ('wakeLock' in navigator) {
           try {
+              if (wakeLockRef.current) return;
               const sentinel = await navigator.wakeLock.request('screen');
               wakeLockRef.current = sentinel;
-              console.log('Wake Lock active');
+              console.log('Wake Lock acquired (Native)');
               sentinel.addEventListener('release', () => {
                   console.log('Wake Lock released');
                   wakeLockRef.current = null;
+                  // If release happened but we still want it, try to re-acquire (might fail if tab hidden)
+                  if (twitchConfig.preventSleep && document.visibilityState === 'visible') {
+                      activateWakeLock();
+                  }
               });
           } catch (err: any) {
-              console.error(`${err.name}, ${err.message}`);
+              console.warn(`Wake Lock API failed: ${err.name}, ${err.message}`);
           }
+      }
+      
+      // 2. Video Hack (Fallback for Android/iOS)
+      if (hiddenVideoRef.current) {
+          try {
+              hiddenVideoRef.current.play().catch(e => console.warn("Video hack play failed", e));
+          } catch(e) { console.warn("Video hack error", e); }
       }
   };
 
@@ -441,17 +495,21 @@ const ControlDeck: React.FC = () => {
           await wakeLockRef.current.release();
           wakeLockRef.current = null;
       }
+      if (hiddenVideoRef.current) {
+          hiddenVideoRef.current.pause();
+      }
   };
 
   useEffect(() => {
       const handleVisibilityChange = () => {
           if (document.visibilityState === 'visible' && twitchConfig.preventSleep) {
-              requestWakeLock();
+              activateWakeLock();
           }
       };
 
       if (twitchConfig.preventSleep) {
-          requestWakeLock();
+          // Add a small delay to ensure user gesture context if called from click
+          setTimeout(activateWakeLock, 100);
           document.addEventListener('visibilitychange', handleVisibilityChange);
       } else {
           releaseWakeLock();
@@ -487,7 +545,11 @@ const ControlDeck: React.FC = () => {
   // --- CONNECTION & RECONNECTION ---
   const connectToOverlay = useCallback(() => {
     if (!peer || inputCode.length !== 4) return;
-    if (conn && conn.open) return;
+    
+    // Close existing if trying to reconnect
+    if (conn) {
+        try { conn.close(); } catch(e){}
+    }
 
     setStatus('CONNECTING');
     const destId = `${PEER_ID_PREFIX}${inputCode}`;
@@ -497,36 +559,68 @@ const ControlDeck: React.FC = () => {
         setStatus('CONNECTED'); 
         setConn(connection);
         setAutoReconnect(true);
+        addLog('info', 'Connected to Overlay');
     });
 
     connection.on('close', () => { 
         setStatus('DISCONNECTED'); 
         setConn(null); 
+        addLog('info', 'Connection closed');
     });
 
     connection.on('error', (err) => { 
         setStatus('DISCONNECTED'); 
         setConn(null); 
+        addLog('error', 'Connection error');
     });
-  }, [peer, inputCode, conn]);
+  }, [peer, inputCode, conn, addLog]);
 
+  // Aggressive Reconnect on Visibility Change (Tab Wake Up)
   useEffect(() => {
-    let interval: number;
-    if (autoReconnect && status === 'DISCONNECTED' && inputCode.length === 4) {
-        interval = window.setInterval(connectToOverlay, 3000);
-    }
-    return () => clearInterval(interval);
-  }, [autoReconnect, status, inputCode, connectToOverlay]);
-
-  useEffect(() => {
-      const handleVisibilityChange = () => {
-          if (document.visibilityState === 'visible' && autoReconnect && status === 'DISCONNECTED') {
-              connectToOverlay();
+      const handleVisibilityForReconnect = () => {
+          if (document.visibilityState === 'visible' && autoReconnect) {
+              // If we thought we were connected, or if disconnected, check health
+              console.log("Tab Awake. Checking Connection...");
+              if (!conn || !conn.open || status === 'DISCONNECTED') {
+                  console.log("Connection stale. Reconnecting...");
+                  connectToOverlay();
+              }
           }
       };
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [autoReconnect, status, connectToOverlay]);
+      document.addEventListener('visibilitychange', handleVisibilityForReconnect);
+      return () => document.removeEventListener('visibilitychange', handleVisibilityForReconnect);
+  }, [autoReconnect, conn, status, connectToOverlay]);
+
+
+  // --- POLL SYNC FIX ---
+  // Sync Poll State to Peer whenever it changes.
+  // This avoids stale closures inside the TwitchIRC callback.
+  useEffect(() => {
+      if (conn && conn.open && poll) {
+          conn.send({ type: 'POLL_UPDATE', poll });
+      } else if (conn && conn.open && !poll) {
+          // If poll was cleared locally, we might want to clear remotely? 
+          // (Usually handled by onEndPoll sending POLL_END)
+      }
+  }, [poll, conn]);
+
+  // --- CHAT READ TRACKING ---
+  const markChatRead = (msgId: string) => {
+      setChatMessages(prev => {
+          const targetIndex = prev.findIndex(m => m.id === msgId);
+          if (targetIndex === -1) return prev;
+          
+          // Since new messages are appended to end, we usually read top-down (oldest first).
+          // But in a chat monitor, usually bottom is newest.
+          // The user requirement: "Si le doy al botón de visto, todos los anteriores se marcan como visto."
+          // In our array, index 0 is oldest, index N is newest.
+          // If we click index i, we want 0...i to be read.
+          return prev.map((msg, idx) => {
+              if (idx <= targetIndex) return { ...msg, read: true };
+              return msg;
+          });
+      });
+  };
 
 
   // --- TWITCH LOGIC ---
@@ -598,7 +692,9 @@ const ControlDeck: React.FC = () => {
                 fetchedUsername, 
                 (msg) => {
                     if (!isMounted) return;
-                    setChatMessages(prev => [...prev.slice(-49), msg]);
+                    // Add new message, default read=false
+                    const newMsg = { ...msg, read: false };
+                    setChatMessages(prev => [...prev.slice(-99), newMsg]);
                     setLastMsgTime(Date.now());
                     
                     setPoll(currentPoll => {
@@ -614,7 +710,7 @@ const ControlDeck: React.FC = () => {
                                      options: updatedOpts, 
                                      totalVotes: currentPoll.totalVotes + 1 
                                  };
-                                 if (conn && conn.open) conn.send({ type: 'POLL_UPDATE', poll: updatedPoll });
+                                 // NOTE: Sending to Peer is now handled by the useEffect[poll, conn] hook above
                                  return updatedPoll;
                              }
                         }
@@ -642,6 +738,16 @@ const ControlDeck: React.FC = () => {
   }, [twitchConfig.accessToken, twitchConfig.channel]);
 
   const sendTriggerPayload = (btn: SoundItem) => {
+      // Check connection before sending, reconnect if needed
+      if (status !== 'CONNECTED' || !conn || !conn.open) {
+          if (autoReconnect) {
+              addLog('info', 'Reconnecting before send...');
+              connectToOverlay();
+              // Cannot send immediately, user must tap again
+              return;
+          }
+      }
+
       if (conn && status === 'CONNECTED') {
           conn.send({ 
               type: 'TRIGGER_SFX', 
@@ -659,6 +765,9 @@ const ControlDeck: React.FC = () => {
   };
 
   const handleButtonPress = (btn: SoundItem) => {
+      // Wake Lock Refresh on interaction
+      if (twitchConfig.preventSleep) activateWakeLock();
+
       if (isEditMode) {
           setEditingButton(btn);
           return;
@@ -742,7 +851,7 @@ const ControlDeck: React.FC = () => {
           totalVotes: 0
       };
       setPoll(newPoll);
-      if (conn && conn.open) conn.send({ type: 'POLL_UPDATE', poll: newPoll });
+      // Handled by useEffect
   };
 
   const endPoll = () => {
@@ -751,6 +860,17 @@ const ControlDeck: React.FC = () => {
           setPoll(ended);
           if (conn && conn.open) conn.send({ type: 'POLL_END', poll: ended });
           setTimeout(() => setPoll(null), 2000); 
+      }
+  };
+
+  const sendPollReaction = (optId: string, type: 'up' | 'down') => {
+      if (conn && conn.open) {
+          conn.send({ type: 'POLL_REACTION', optionId: optId, reaction: type });
+      }
+      if (isDemoMode) {
+          // In demo mode we can't easily visualize this on the tablet overlay preview without more state lifting,
+          // but we can log it.
+          console.log("Demo Reaction:", optId, type);
       }
   };
 
@@ -767,6 +887,59 @@ const ControlDeck: React.FC = () => {
       setEvents(prev => prev.map(e => e.id === id ? { ...e, seen: true } : e));
   };
 
+  const celebrateEvent = (evt: StreamEvent) => {
+      // 1. Determine template based on event type
+      const templates = twitchConfig.eventTemplates || DEFAULT_EVENT_TEMPLATES;
+      let template = templates.follow;
+      let sfxPreset = 'ui-success';
+      let color = 'bg-pink-600';
+
+      if (evt.type === 'SUB') { 
+          template = templates.sub; 
+          sfxPreset = 'fun-wow'; 
+          color = 'bg-purple-600';
+      }
+      if (evt.type === 'RAID') { 
+          template = templates.raid; 
+          sfxPreset = 'scifi-alarm'; 
+          color = 'bg-red-600';
+      }
+      if (evt.type === 'CHEER') { 
+          template = templates.cheer; 
+          sfxPreset = 'retro-coin'; 
+          color = 'bg-yellow-500';
+      }
+
+      const label = template.replace('{user}', evt.username);
+
+      // 2. Trigger on Overlay
+      if (conn && conn.open) {
+          conn.send({
+              type: 'TRIGGER_SFX',
+              sfxId: `event-${evt.id}`,
+              customLabel: label,
+              soundPreset: sfxPreset,
+              color: color,
+              animation: 'bounce',
+              fontStyle: 'comic'
+          });
+      }
+
+      if (isDemoMode) {
+          triggerDemoAlert({
+              type: 'sfx',
+              label: label,
+              color: color,
+              animation: 'bounce',
+              fontStyle: 'comic'
+          });
+          playSynthSound(sfxPreset);
+      }
+
+      // 3. Dismiss from list
+      dismissEvent(evt.id);
+  };
+
   // --- RENDER HELPERS ---
   if (showSettings) {
     return <Settings 
@@ -781,10 +954,22 @@ const ControlDeck: React.FC = () => {
   }
 
   // Connect Screen
-  if (status !== 'CONNECTED' && !autoReconnect && !isDemoMode) {
+  if (status !== 'CONNECTED' && !autoReconnect && !isDemoMode && !isDeckOnlyMode) {
       return (
           <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4 relative">
               
+              {/* HIDDEN VIDEO HACK ELEMENT */}
+              <video 
+                  ref={hiddenVideoRef} 
+                  playsInline 
+                  muted 
+                  loop 
+                  width="1" 
+                  height="1" 
+                  style={{ position: 'absolute', opacity: 0.01, pointerEvents: 'none' }}
+                  src="data:video/mp4;base64,AAAAHGZ0eXBNNBBwAAAAAAAAbW9vdgAAAABsbXZoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA7gAAAAEAAAEAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAdHJhawAAAFx0a2hkAAAAAdAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAABAAAAAmdtZGwAAAAUZ21pbgAAAAAAAAABAAAAEFFzbWhkAAAAAAAAAAAAAAJkaGluZgAAABRkaW5mAAAAAGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAA5zdGJsAAAAFHN0c2QAAAAAAAAAAQAAAARtcDR2AAAAFHN0dHMAAAAAAAAAAQAAAAEAAAAcc3RzYwAAAAAAAAABAAAAAQAAAAEAAAABAAAAFHN0c3oAAAAAAAAAEAAAAAEAAAAUc3RjbwAAAAAAAAABAAAAAAAAYXVkYXQ="
+              />
+
               {/* Onboarding Bubble for Connect Screen */}
               {showOnboarding && (
                   <div className="absolute z-50 top-4 right-4 md:right-auto md:top-auto md:mb-64 animate-bounce-in max-w-xs w-full">
@@ -823,8 +1008,11 @@ const ControlDeck: React.FC = () => {
                   </div>
                   <button onClick={connectToOverlay} disabled={inputCode.length !== 4 || status === 'CONNECTING'} className="w-full py-4 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-purple-900/50">{status === 'CONNECTING' ? 'Connecting...' : 'CONNECT'}</button>
                   <div className="mt-6 pt-6 border-t border-gray-700 flex flex-col gap-3 text-center">
-                    <button onClick={() => setIsDemoMode(true)} className="w-full py-3 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold text-sm text-yellow-500 border border-yellow-500/30 flex items-center justify-center"><FlaskConical className="w-4 h-4 mr-2" /> Enter Demo Mode</button>
-                    <button onClick={() => window.location.hash = '/overlay'} className="inline-flex items-center justify-center text-purple-400 hover:text-purple-300 text-sm font-semibold"><Monitor className="w-4 h-4 mr-2" /> Launch Overlay Mode</button>
+                    <button onClick={() => setIsDeckOnlyMode(true)} className="w-full py-3 bg-blue-900/30 hover:bg-blue-800/40 rounded-xl font-bold text-sm text-blue-400 border border-blue-500/30 flex items-center justify-center"><Eye className="w-4 h-4 mr-2" /> Deck Only (Chat Monitor)</button>
+                    <div className="flex gap-2">
+                        <button onClick={() => setIsDemoMode(true)} className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold text-sm text-yellow-500 border border-yellow-500/30 flex items-center justify-center"><FlaskConical className="w-4 h-4 mr-2" /> Demo</button>
+                        <button onClick={() => window.location.hash = '/overlay'} className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold text-sm text-purple-400 border border-purple-500/30 flex items-center justify-center"><Monitor className="w-4 h-4 mr-2" /> Overlay</button>
+                    </div>
                   </div>
               </div>
           </div>
@@ -835,6 +1023,18 @@ const ControlDeck: React.FC = () => {
   return (
     <div className="w-full h-screen flex flex-col md:flex-row bg-gray-900 text-white relative overflow-hidden">
       
+      {/* HIDDEN VIDEO HACK ELEMENT (Main View) */}
+      <video 
+          ref={hiddenVideoRef} 
+          playsInline 
+          muted 
+          loop 
+          width="1" 
+          height="1" 
+          style={{ position: 'absolute', opacity: 0.01, pointerEvents: 'none' }}
+          src="data:video/mp4;base64,AAAAHGZ0eXBNNBBwAAAAAAAAbW9vdgAAAABsbXZoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA7gAAAAEAAAEAAAEAAAABAAAAAAAAAAAAAAAAAAAAAAAAdHJhawAAAFx0a2hkAAAAAdAAAAAAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAEAAAABAAAAAmdtZGwAAAAUZ21pbgAAAAAAAAABAAAAEFFzbWhkAAAAAAAAAAAAAAJkaGluZgAAABRkaW5mAAAAAGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAA5zdGJsAAAAFHN0c2QAAAAAAAAAAQAAAARtcDR2AAAAFHN0dHMAAAAAAAAAAQAAAAEAAAAcc3RzYwAAAAAAAAABAAAAAQAAAAEAAAABAAAAFHN0c3oAAAAAAAAAEAAAAAEAAAAUc3RjbwAAAAAAAAABAAAAAAAAYXVkYXQ="
+      />
+
       {/* DEMO OVERLAY PREVIEW LAYER */}
       {isDemoMode && (
           <div className="fixed inset-0 z-50 pointer-events-none">
@@ -842,14 +1042,18 @@ const ControlDeck: React.FC = () => {
           </div>
       )}
 
-      {/* Sidebar */}
-      <div className="md:w-72 bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-[50vh] md:h-full z-40 shadow-xl">
+      {/* Sidebar (Expands to full width in Deck Only mode) */}
+      <div className={`${isDeckOnlyMode ? 'w-full' : 'md:w-72'} bg-gray-800 border-r border-gray-700 flex-shrink-0 flex flex-col h-[50vh] md:h-full z-40 shadow-xl transition-all duration-300`}>
          
          {/* Top Status */}
          <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900 flex-shrink-0">
             {isDemoMode ? (
                 <div className="flex items-center gap-2 text-yellow-500 font-bold text-xs animate-pulse px-2 py-1 bg-yellow-900/30 rounded border border-yellow-500/50">
                     <FlaskConical className="w-3 h-3" /> DEMO MODE
+                </div>
+            ) : isDeckOnlyMode ? (
+                <div className="flex items-center gap-2 text-blue-400 font-bold text-xs px-2 py-1 bg-blue-900/30 rounded border border-blue-500/50">
+                    <Eye className="w-3 h-3" /> DECK MONITOR
                 </div>
             ) : (
                 status === 'CONNECTED' ? (
@@ -860,14 +1064,18 @@ const ControlDeck: React.FC = () => {
             )}
             
             <div className="flex gap-2 items-center">
-                 <button onClick={() => setIsDemoMode(!isDemoMode)} className={`p-1 rounded text-xs font-bold ${isDemoMode ? 'text-yellow-500 bg-yellow-900/30' : 'text-gray-500 hover:text-white'}`} title="Toggle Demo Mode">
-                     {isDemoMode ? 'EXIT DEMO' : 'DEMO'}
-                 </button>
+                 {isDemoMode && (
+                     <button onClick={() => setIsDemoMode(false)} className="p-1 rounded text-xs font-bold text-yellow-500 bg-yellow-900/30" title="Exit Demo Mode">
+                         EXIT DEMO
+                     </button>
+                 )}
                  <button onClick={toggleFullscreen} className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700" title="Toggle Fullscreen">
                      {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                  </button>
                  <button onClick={() => setShowSettings(true)} className="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-700"><SettingsIcon className="w-4 h-4"/></button>
-                 <button onClick={() => { setConn(null); setStatus('DISCONNECTED'); setAutoReconnect(false); setIsDemoMode(false); }} className="text-xs text-red-400 hover:text-red-300 ml-1">Disconnect</button>
+                 <button onClick={() => { setConn(null); setStatus('DISCONNECTED'); setAutoReconnect(false); setIsDemoMode(false); setIsDeckOnlyMode(false); }} className="text-xs text-red-400 hover:text-red-300 ml-1">
+                     {isDeckOnlyMode ? 'Exit' : 'Disconnect'}
+                 </button>
             </div>
          </div>
          
@@ -891,7 +1099,13 @@ const ControlDeck: React.FC = () => {
              {activeTab === 'chat' && (
                  <>
                     <div className="flex-1 overflow-hidden relative">
-                        <ChatMonitor messages={chatMessages} lastMessageTime={lastMsgTime} onShowOnStream={showChatOnStream} />
+                        <ChatMonitor 
+                            messages={chatMessages} 
+                            lastMessageTime={lastMsgTime} 
+                            onShowOnStream={showChatOnStream}
+                            onMarkRead={markChatRead}
+                            isDeckOnlyMode={isDeckOnlyMode}
+                        />
                     </div>
                     {/* Chat Input Area */}
                     <form onSubmit={(e) => { e.preventDefault(); if(chatInput.trim() && ircClient) { ircClient.sendMessage(chatInput); setChatInput(''); }}} className="mt-2 flex gap-1 flex-shrink-0">
@@ -902,11 +1116,11 @@ const ControlDeck: React.FC = () => {
              )}
 
              {activeTab === 'events' && (
-                 <EventsPanel events={events} onDismiss={dismissEvent} />
+                 <EventsPanel events={events} onDismiss={dismissEvent} onCelebrate={celebrateEvent} isDeckOnlyMode={isDeckOnlyMode} />
              )}
 
              {activeTab === 'tools' && (
-                 <PollTool activePoll={poll} onCreate={startPoll} onEnd={endPoll} />
+                 <PollTool activePoll={poll} onCreate={startPoll} onEnd={endPoll} onReaction={sendPollReaction} isDeckOnlyMode={isDeckOnlyMode} />
              )}
 
              {activeTab === 'demo' && isDemoMode && (
@@ -920,65 +1134,67 @@ const ControlDeck: React.FC = () => {
          </div>
       </div>
 
-      {/* Main Content (Button Grid) */}
-      <div className="flex-1 bg-gray-900/95 flex flex-col h-full overflow-hidden relative z-0">
-         
-         {/* Header */}
-         <div className="flex justify-between items-center p-4 bg-gray-900 border-b border-gray-800 flex-shrink-0">
-             <h1 className="text-xl font-bold text-gray-400 flex items-center gap-2"><Volume2 className="w-5 h-5" /> Soundboard</h1>
-             <div className="flex items-center gap-2">
-                 {status !== 'CONNECTED' && !isDemoMode && (
-                     <div className="text-xs text-yellow-500 font-bold animate-pulse px-2 flex items-center gap-1 border border-yellow-500/50 rounded bg-yellow-900/20">
-                         <WifiOff className="w-3 h-3"/> Reconnecting...
-                     </div>
-                 )}
-                 <button 
-                    onClick={() => setIsEditMode(!isEditMode)} 
-                    className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition ${isEditMode ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500 animate-pulse' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}
-                 >
-                     <Edit2 className="w-3 h-3" /> {isEditMode ? 'Done Editing' : 'Edit Buttons'}
-                 </button>
+      {/* Main Content (Button Grid) - Hidden in Deck Only Mode */}
+      {!isDeckOnlyMode && (
+          <div className="flex-1 bg-gray-900/95 flex flex-col h-full overflow-hidden relative z-0">
+             
+             {/* Header */}
+             <div className="flex justify-between items-center p-4 bg-gray-900 border-b border-gray-800 flex-shrink-0">
+                 <h1 className="text-xl font-bold text-gray-400 flex items-center gap-2"><Volume2 className="w-5 h-5" /> Soundboard</h1>
+                 <div className="flex items-center gap-2">
+                     {status !== 'CONNECTED' && !isDemoMode && (
+                         <div className="text-xs text-yellow-500 font-bold animate-pulse px-2 flex items-center gap-1 border border-yellow-500/50 rounded bg-yellow-900/20">
+                             <WifiOff className="w-3 h-3"/> Reconnecting...
+                         </div>
+                     )}
+                     <button 
+                        onClick={() => setIsEditMode(!isEditMode)} 
+                        className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border transition ${isEditMode ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500 animate-pulse' : 'bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700'}`}
+                     >
+                         <Edit2 className="w-3 h-3" /> {isEditMode ? 'Done Editing' : 'Edit Buttons'}
+                     </button>
+                 </div>
              </div>
-         </div>
-         
-         {/* Scrollable Grid */}
-         <div className="flex-1 overflow-y-auto p-4">
-             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-20">
-                {soundButtons.map(sound => {
-                    const IconComp = (Icons as any)[sound.iconName] || Icons.Zap;
-                    return (
-                        <button
-                            key={sound.id}
-                            onClick={() => handleButtonPress(sound)}
-                            className={`relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-b-8 active:border-b-0 active:translate-y-2 h-32 overflow-hidden group
-                                ${isEditMode ? 'border-dashed border-2 bg-gray-800 border-gray-600 hover:border-yellow-500 cursor-alias' : `${sound.color} border-black/20 hover:scale-105`}
-                            `}
-                        >
-                            {isEditMode && <div className="absolute top-2 right-2 bg-black/50 p-1 rounded-full z-10"><Edit2 className="w-3 h-3 text-white" /></div>}
-                            <IconComp className={`w-8 h-8 ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`} />
-                            <span className={`font-black text-lg tracking-wider ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`}>{sound.label}</span>
-                            {!isEditMode && sound.animation && sound.animation !== 'none' && (
-                                <div className="absolute bottom-2 right-2 opacity-50"><Icons.Sparkles className="w-3 h-3" /></div>
-                            )}
-                        </button>
-                    );
-                })}
+             
+             {/* Scrollable Grid */}
+             <div className="flex-1 overflow-y-auto p-4">
+                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-20">
+                    {soundButtons.map(sound => {
+                        const IconComp = (Icons as any)[sound.iconName] || Icons.Zap;
+                        return (
+                            <button
+                                key={sound.id}
+                                onClick={() => handleButtonPress(sound)}
+                                className={`relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-b-8 active:border-b-0 active:translate-y-2 h-32 overflow-hidden group
+                                    ${isEditMode ? 'border-dashed border-2 bg-gray-800 border-gray-600 hover:border-yellow-500 cursor-alias' : `${sound.color} border-black/20 hover:scale-105`}
+                                `}
+                            >
+                                {isEditMode && <div className="absolute top-2 right-2 bg-black/50 p-1 rounded-full z-10"><Edit2 className="w-3 h-3 text-white" /></div>}
+                                <IconComp className={`w-8 h-8 ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`} />
+                                <span className={`font-black text-lg tracking-wider ${isEditMode ? 'text-gray-500' : 'text-white drop-shadow-md'}`}>{sound.label}</span>
+                                {!isEditMode && sound.animation && sound.animation !== 'none' && (
+                                    <div className="absolute bottom-2 right-2 opacity-50"><Icons.Sparkles className="w-3 h-3" /></div>
+                                )}
+                            </button>
+                        );
+                    })}
 
-                {/* ADD NEW BUTTON (Visible in Edit Mode) */}
-                {isEditMode && (
-                    <button
-                        onClick={addNewButton}
-                        className="relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-600 bg-gray-800/50 hover:bg-gray-800 hover:border-green-500 group h-32"
-                    >
-                        <div className="p-3 rounded-full bg-gray-800 group-hover:bg-green-900/30 transition-colors">
-                            <Plus className="w-8 h-8 text-gray-500 group-hover:text-green-500" />
-                        </div>
-                        <span className="font-bold text-sm text-gray-500 group-hover:text-green-500 uppercase tracking-widest">Add New</span>
-                    </button>
-                )}
+                    {/* ADD NEW BUTTON (Visible in Edit Mode) */}
+                    {isEditMode && (
+                        <button
+                            onClick={addNewButton}
+                            className="relative rounded-2xl shadow-lg transition-all flex flex-col items-center justify-center gap-2 border-2 border-dashed border-gray-600 bg-gray-800/50 hover:bg-gray-800 hover:border-green-500 group h-32"
+                        >
+                            <div className="p-3 rounded-full bg-gray-800 group-hover:bg-green-900/30 transition-colors">
+                                <Plus className="w-8 h-8 text-gray-500 group-hover:text-green-500" />
+                            </div>
+                            <span className="font-bold text-sm text-gray-500 group-hover:text-green-500 uppercase tracking-widest">Add New</span>
+                        </button>
+                    )}
+                 </div>
              </div>
-         </div>
-      </div>
+          </div>
+      )}
 
       {/* Button Editor Modal */}
       {editingButton && (

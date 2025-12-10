@@ -1,3 +1,4 @@
+
 import { ChatMessage, StreamEvent, PollState } from '../types';
 
 const MOCK_USERS = [
@@ -54,7 +55,8 @@ export const generateMockChat = (): ChatMessage => {
     message: rawMsg,
     tokens: tokens as any[],
     color: user.color,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    read: false
   };
 };
 

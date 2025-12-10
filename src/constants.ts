@@ -1,4 +1,5 @@
-import { SoundItem } from './types';
+
+import { SoundItem, EventTemplates } from './types';
 
 export const PEER_ID_PREFIX = 'streamdeck-app-v1-';
 export const SYNC_PEER_PREFIX = 'streamdeck-sync-v1-';
@@ -21,6 +22,13 @@ export const ANIMATION_STYLES = [
   { id: 'spin', label: 'Spin' },
   { id: 'flash', label: 'Flash' },
 ];
+
+export const DEFAULT_EVENT_TEMPLATES: EventTemplates = {
+    follow: '{user} is now following!',
+    sub: '{user} just subscribed!',
+    raid: 'Raid incoming from {user}!',
+    cheer: '{user} cheered bits!'
+};
 
 export const SOUND_LIBRARY = {
   'retro': [

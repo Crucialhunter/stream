@@ -1,3 +1,4 @@
+
 export type AppMode = 'CONTROL' | 'OVERLAY' | 'SETTINGS';
 
 export type FontStyle = 'standard' | 'retro' | 'scifi' | 'comic' | 'horror' | 'handwritten';
@@ -34,6 +35,7 @@ export interface ChatMessage {
   tokens: MessageToken[];
   color?: string;
   timestamp: number;
+  read?: boolean; // New property for tracking read status
 }
 
 export interface StreamEvent {
@@ -74,12 +76,20 @@ export interface ActiveAlert {
     textColor?: string;
 }
 
+export interface EventTemplates {
+    follow: string;
+    sub: string;
+    raid: string;
+    cheer: string;
+}
+
 export interface TwitchConfig {
   clientId: string;
   accessToken: string;
   channel: string;
   viewerUpdateInterval?: number; // seconds
-  preventSleep?: boolean; // New: Wake Lock preference
+  preventSleep?: boolean; 
+  eventTemplates?: EventTemplates; // New customizable templates
 }
 
 export interface DeckConfig {
@@ -92,7 +102,6 @@ export type PeerPayload =
   | { 
       type: 'TRIGGER_SFX'; 
       sfxId: string; 
-      // Overrides for playback/display
       customImage?: string; 
       customLabel?: string; 
       customSound?: string;
@@ -105,6 +114,7 @@ export type PeerPayload =
   | { type: 'SHOW_CHAT_MSG'; msg: ChatMessage }
   | { type: 'POLL_UPDATE'; poll: PollState }
   | { type: 'POLL_END'; poll: PollState }
+  | { type: 'POLL_REACTION'; optionId: string; reaction: 'up' | 'down' } // New reaction type
   | { type: 'ALERT'; alertType: 'INACTIVITY' | 'FOLLOW' };
 
 export type SyncPayload =
